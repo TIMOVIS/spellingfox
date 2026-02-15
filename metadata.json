@@ -1,0 +1,7 @@
+{
+  "name": "Spelling Fox",
+  "description": "An adventurous vocabulary and spelling builder for Year 4 & 5 students. Join the Spelling Fox on a 5-minute daily quest to master the UK curriculum through fun games.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
