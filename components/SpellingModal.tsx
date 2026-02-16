@@ -43,6 +43,8 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
   // Touch Tracking
   const lastTouchPos = useRef<{ x: number, y: number } | null>(null);
   const isProcessingLetter = useRef(false);
+  /** When we collect a letter inside setActiveLetters, store newSnake here so the outer setSnake can return it (avoid reverting). */
+  const letterCollectNewSnake = useRef<{ x: number; y: number }[] | null>(null);
 
   const currentWord = queue[0];
   const targetLetters = currentWord ? currentWord.word.toUpperCase().split('') : [];
@@ -140,36 +142,34 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
         
         if (hitLetter && hitLetter.isCorrect && !isProcessingLetter.current) {
           isProcessingLetter.current = true;
-          
+          // So outer setSnake returns this and doesn't revert the move
+          const newSnake = [newHead, ...prev];
+          letterCollectNewSnake.current = newSnake;
+          setSnake(newSnake);
+
           // Remove the collected letter immediately
           const remainingLetters = prevActiveLetters.filter(l => l.id !== hitLetter.id);
-          
-          // Update snake (grow by one)
-          const newSnake = [newHead, ...prev];
-          setSnake(newSnake);
-          
+
           // Update collected letters
           setCollectedLetters(prevLetters => {
             const currentTargetLetters = currentWord.word.toUpperCase().split('');
-            
+
             // Safety checks
             if (prevLetters.length >= currentTargetLetters.length) {
-              isProcessingLetter.current = false;
               return prevLetters;
             }
-            
+
             // Verify this is the correct next letter
             const expectedNextChar = currentTargetLetters[prevLetters.length];
             if (hitLetter.char !== expectedNextChar) {
-              isProcessingLetter.current = false;
               return prevLetters;
             }
-            
+
             const updated = [...prevLetters, hitLetter.char];
-            
+
             // Award 10 points for each correct letter collected
             setScore(s => s + 10);
-            
+
             if (updated.length === currentTargetLetters.length) {
               setGameState('feedback');
               setScore(s => s + 200); // Bonus for completing the word
@@ -177,11 +177,15 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
             } else {
               spawnLetters(updated, newSnake, currentWord.word);
             }
-            
-            isProcessingLetter.current = false;
+
             return updated;
           });
-          
+
+          // Allow next move immediately; don't wait for setCollectedLetters to run
+          queueMicrotask(() => {
+            isProcessingLetter.current = false;
+          });
+
           return remainingLetters;
         } else if (hitLetter && !hitLetter.isCorrect) {
           // Wrong letter! Mark word for retry and flag the letter
@@ -200,6 +204,12 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
         return prevActiveLetters;
       });
 
+      // If we collected a letter, setActiveLetters set letterCollectNewSnake so we don't revert
+      const nextSnake = letterCollectNewSnake.current;
+      if (nextSnake) {
+        letterCollectNewSnake.current = null;
+        return nextSnake;
+      }
       return prev;
     });
   }, [currentWord.word, spawnLetters]);

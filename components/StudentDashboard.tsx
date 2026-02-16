@@ -127,7 +127,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ name, wordBank, dai
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black mb-1">Spelling Only</span>
+                    <span className="block text-3xl font-black mb-1">Spelling Snake</span>
                     <span className="text-orange-600/70 font-bold uppercase tracking-widest text-xs">Jump straight to the game</span>
                   </div>
                   <span className="text-5xl group-hover:rotate-12 transition-transform">🐍</span>
