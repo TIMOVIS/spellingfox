@@ -197,14 +197,15 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
           return prevActiveLetters.map(l => l.id === hitLetter.id ? { ...l, isFlaggedWrong: true } : l);
         }
         
-        // No letter hit - standard move
+        // No letter hit - standard move (set ref so outer returns this; avoids Strict Mode reverting)
         const newSnake = [newHead, ...prev];
         newSnake.pop();
+        letterCollectNewSnake.current = newSnake;
         setSnake(newSnake);
         return prevActiveLetters;
       });
 
-      // If we collected a letter, setActiveLetters set letterCollectNewSnake so we don't revert
+      // Whenever setActiveLetters updated the snake (letter collect or plain move), return that so we don't revert
       const nextSnake = letterCollectNewSnake.current;
       if (nextSnake) {
         letterCollectNewSnake.current = null;
