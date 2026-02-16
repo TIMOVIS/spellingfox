@@ -2,12 +2,29 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { WordEntry, YearGroup } from "./types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+const apiKey = typeof process !== 'undefined' ? (process.env.API_KEY || '') : '';
+const ai = new GoogleGenAI({ apiKey });
+
+/** In production the key is not in the bundle; call the Netlify function instead. */
+async function callGeminiServer<T>(action: string, payload: Record<string, unknown>): Promise<T> {
+  const base = typeof window !== 'undefined' ? window.location.origin : '';
+  const res = await fetch(`${base}/.netlify/functions/gemini`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.json();
+}
 
 /**
  * Generates a full dictionary entry for a single word.
  */
 export const generateWordExplanation = async (word: string): Promise<Partial<WordEntry & { etymology?: any; morphology?: any; letterStrings?: string[] }>> => {
+  if (!apiKey) return callGeminiServer('wordExplanation', { word });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `Analyze the word "${word}" for a primary school child in the UK. 
@@ -78,6 +95,7 @@ export const generateWordExplanation = async (word: string): Promise<Partial<Wor
  * Generates a themed list of 5 spelling words for a daily quest.
  */
 export const generateDailySpellingList = async (yearGroup: YearGroup = 'Year 5'): Promise<WordEntry[]> => {
+  if (!apiKey) return callGeminiServer('dailyList', { yearGroup });
   const response = await ai.models.generateContent({
     model: 'gemini-3-flash-preview',
     contents: `Generate a themed set of 5 challenging spelling words for ${yearGroup} UK students. 
@@ -123,11 +141,7 @@ export const generateDailySpellingList = async (yearGroup: YearGroup = 'Year 5')
  * Extracts vocabulary from files with literary context and antonyms.
  */
 export const extractVocabularyFromFile = async (base64Data: string, mimeType: string): Promise<WordEntry[]> => {
-  // Check if API key is configured
-  if (!process.env.API_KEY || process.env.API_KEY === "") {
-    throw new Error("API key is not configured. Please set GEMINI_API_KEY in your .env.local file and restart the dev server.");
-  }
-
+  if (!apiKey) return callGeminiServer('extractFile', { base64Data, mimeType });
   if (!base64Data || base64Data.length === 0) {
     throw new Error("File data is empty. Please try uploading the file again.");
   }
@@ -238,8 +252,9 @@ export const extractVocabularyFromFile = async (base64Data: string, mimeType: st
 };
 
 export const generateQuizQuestions = async (words: string[]) => {
+  if (!apiKey) return callGeminiServer('quizQuestions', { words });
   const isSingleWord = words.length === 1;
-  
+
   const prompt = isSingleWord 
     ? `Create a focused 3-question vocabulary quiz for primary students in the UK about "${words[0]}". 
        IMPORTANT: One question MUST be about identifying the correct spelling of "${words[0]}" from a list of tricky common misspellings. 

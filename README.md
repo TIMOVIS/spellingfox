@@ -52,7 +52,7 @@ Vocabulary and spelling app for students: daily quests, word bank, spelling snak
    |----------|----------|-------------|
    | `VITE_SUPABASE_URL` | Yes | Supabase project URL (e.g. `https://xxxx.supabase.co`) |
    | `VITE_SUPABASE_ANON_KEY` | Yes | Supabase anon/publishable key |
-   | `GEMINI_API_KEY` | For AI features | Gemini API key for word generation |
+   | `GEMINI_API_KEY` | For AI features | Gemini API key (used only in serverless function; not in browser bundle) |
    | `CLAUDE_API_KEY` | Optional | Claude API key if using Claude |
 
    - Trigger a new deploy: **Deploys** → **Trigger deploy** → **Clear cache and deploy site**.

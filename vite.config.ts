@@ -6,10 +6,13 @@ export default defineConfig(({ mode }) => {
     // Load from .env files (local dev); Netlify injects process.env at build time
     const env = loadEnv(mode, process.cwd(), '');
     const getEnv = (key: string) => process.env[key] ?? env[key];
+    // In production build, never embed API keys (Netlify secrets scan; key stays in serverless function)
+    const isProd = mode === 'production';
+    const apiKey = isProd ? '' : (getEnv('GEMINI_API_KEY') || getEnv('CLAUDE_API_KEY'));
 
-    if (getEnv('GEMINI_API_KEY')) {
+    if (!isProd && getEnv('GEMINI_API_KEY')) {
       console.log('✓ GEMINI_API_KEY found in environment');
-    } else {
+    } else if (!isProd) {
       console.warn('⚠ GEMINI_API_KEY not set. Set it in .env.local (local) or Netlify env (deploy).');
     }
 
@@ -20,9 +23,9 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react()],
       define: {
-        'process.env.API_KEY': JSON.stringify(getEnv('GEMINI_API_KEY') || getEnv('CLAUDE_API_KEY')),
-        'process.env.GEMINI_API_KEY': JSON.stringify(getEnv('GEMINI_API_KEY')),
-        'process.env.CLAUDE_API_KEY': JSON.stringify(getEnv('CLAUDE_API_KEY')),
+        'process.env.API_KEY': JSON.stringify(apiKey),
+        'process.env.GEMINI_API_KEY': JSON.stringify(isProd ? '' : getEnv('GEMINI_API_KEY')),
+        'process.env.CLAUDE_API_KEY': JSON.stringify(isProd ? '' : getEnv('CLAUDE_API_KEY')),
       },
       resolve: {
         alias: {
