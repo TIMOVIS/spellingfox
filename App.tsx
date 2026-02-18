@@ -6,7 +6,8 @@ import StudentNameEntry from './components/StudentNameEntry';
 import TutorDashboard from './components/TutorDashboard';
 import StudentSelector from './components/StudentSelector';
 import Navbar from './components/Navbar';
-import { toggleDailyQuestWord, addStudent as addStudentToSupabase, deleteStudent as deleteStudentFromSupabase, getAllStudents, getStudentProgress, getDailyQuestWordIds, getStudent, addPointsToStudent } from './lib/supabaseQueries';
+import { toggleDailyQuestWord, addStudent as addStudentToSupabase, deleteStudent as deleteStudentFromSupabase, getAllStudents, getStudentProgress, getDailyQuestWordIds, getStudent, addPointsToStudent, savePracticeRecords } from './lib/supabaseQueries';
+import type { WordPracticeResult, PracticeActivityType } from './lib/supabaseQueries';
 import { getAllWords } from './lib/supabaseQueries';
 import { VocabWord } from './lib/supabase';
 
@@ -380,18 +381,20 @@ const App: React.FC = () => {
             />
           ) : (
             <StudentDashboard 
+              studentId={currentStudentId}
               name={state.studentName} 
               wordBank={state.wordBank}
               dailyWordIds={state.dailyWordIds}
-              onCompleteExercise={async (pts) => {
-                // Update local state immediately
+              onCompleteExercise={async (pts, options?: { wordResults: WordPracticeResult[]; activityType: PracticeActivityType }) => {
                 setState(prev => ({ ...prev, points: prev.points + pts }));
-                // Save to Supabase
                 if (currentStudentId) {
                   try {
                     await addPointsToStudent(currentStudentId, pts);
+                    if (options?.wordResults?.length) {
+                      await savePracticeRecords(currentStudentId, options.activityType, options.wordResults);
+                    }
                   } catch (error) {
-                    console.error('Failed to save points to Supabase:', error);
+                    console.error('Failed to save to Supabase:', error);
                   }
                 }
               }}

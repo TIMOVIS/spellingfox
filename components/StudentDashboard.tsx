@@ -1,25 +1,47 @@
-
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { WordEntry } from '../types';
 import SpellingModal from './SpellingModal';
 import SpellingBeeModal from './SpellingBeeModal';
 import FlashcardQuest from './FlashcardQuest';
 import QuizModal from './QuizModal';
+import { getStudentPracticeHistoryByDate } from '../lib/supabaseQueries';
+import type { PracticeActivityType } from '../lib/supabaseQueries';
 
 interface StudentDashboardProps {
+  studentId: string | null;
   name: string;
   wordBank: WordEntry[];
   dailyWordIds: string[];
-  onCompleteExercise: (points: number) => void;
+  onCompleteExercise: (points: number, options?: { wordResults: import('../lib/supabaseQueries').WordPracticeResult[]; activityType: PracticeActivityType }) => void;
 }
 
-const StudentDashboard: React.FC<StudentDashboardProps> = ({ name, wordBank, dailyWordIds, onCompleteExercise }) => {
+type PracticeDay = { date: string; records: { word: string; activity_type: string; correct: boolean }[] };
+
+const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wordBank, dailyWordIds, onCompleteExercise }) => {
   const [viewMode, setViewMode] = useState<'hub' | 'wordList'>('hub');
   const [showSpelling, setShowSpelling] = useState(false);
   const [showSpellingBee, setShowSpellingBee] = useState(false);
   const [activeFlashcard, setActiveFlashcard] = useState<WordEntry | null>(null);
   const [showQuiz, setShowQuiz] = useState(false);
   const [quizWords, setQuizWords] = useState<string[]>([]);
+  const [practiceHistory, setPracticeHistory] = useState<PracticeDay[]>([]);
+  const [showPracticeHistory, setShowPracticeHistory] = useState(false);
+
+  useEffect(() => {
+    if (!studentId) return;
+    getStudentPracticeHistoryByDate(studentId, 30)
+      .then(setPracticeHistory)
+      .catch(() => setPracticeHistory([]));
+  }, [studentId]);
+
+  // Refetch when opening the panel so latest practice is shown
+  useEffect(() => {
+    if (showPracticeHistory && studentId) {
+      getStudentPracticeHistoryByDate(studentId, 30)
+        .then(setPracticeHistory)
+        .catch(() => setPracticeHistory([]));
+    }
+  }, [showPracticeHistory, studentId]);
 
   const LONDON = 'Europe/London';
 
@@ -142,11 +164,26 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ name, wordBank, dai
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
                     <span className="block text-3xl font-black mb-1">Spelling Bee</span>
-                    <span className="text-amber-600/70 font-bold uppercase tracking-widest text-xs">Say the letters out loud</span>
+                    <span className="text-amber-600/70 font-bold uppercase tracking-widest text-xs">Type the letters</span>
                   </div>
                   <span className="text-5xl group-hover:scale-110 transition-transform">🐝</span>
                 </div>
               </button>
+
+              {studentId && (
+                <button 
+                  onClick={() => setShowPracticeHistory(true)}
+                  className="group relative bg-gray-100 hover:bg-gray-200 text-gray-700 p-6 rounded-[2rem] transition-all hover:scale-[1.01] active:scale-[0.99] shadow border border-gray-200 overflow-hidden"
+                >
+                  <div className="relative z-10 flex items-center justify-between">
+                    <div className="text-left">
+                      <span className="block text-xl font-black mb-0.5">My practice</span>
+                      <span className="text-gray-500 font-bold text-xs">See which words you practiced and what was right or wrong</span>
+                    </div>
+                    <span className="text-3xl">📋</span>
+                  </div>
+                </button>
+              )}
             </div>
           </div>
           
@@ -201,8 +238,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ name, wordBank, dai
         <SpellingModal 
           wordEntries={dailyWords}
           onClose={() => setShowSpelling(false)}
-          onFinish={(pts) => {
-            onCompleteExercise(pts);
+          onFinish={(pts, wordResults) => {
+            onCompleteExercise(pts, wordResults?.length ? { wordResults, activityType: 'spelling_snake' } : undefined);
             setShowSpelling(false);
           }}
         />
@@ -212,8 +249,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ name, wordBank, dai
         <SpellingBeeModal 
           wordEntries={dailyWords}
           onClose={() => setShowSpellingBee(false)}
-          onFinish={(pts) => {
-            onCompleteExercise(pts);
+          onFinish={(pts, wordResults) => {
+            onCompleteExercise(pts, wordResults?.length ? { wordResults, activityType: 'spelling_bee' } : undefined);
             setShowSpellingBee(false);
           }}
         />
@@ -237,6 +274,46 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ name, wordBank, dai
             setShowQuiz(false);
           }}
         />
+      )}
+
+      {/* Practice history overlay */}
+      {showPracticeHistory && (
+        <div className="fixed inset-0 bg-amber-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[85vh] flex flex-col border-4 border-amber-200 overflow-hidden">
+            <div className="p-4 sm:p-6 border-b border-amber-100 flex justify-between items-center shrink-0">
+              <h2 className="text-xl font-black text-amber-950">My practice</h2>
+              <button onClick={() => setShowPracticeHistory(false)} className="p-2 hover:bg-amber-100 rounded-xl transition-colors">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 min-h-0">
+              {practiceHistory.length === 0 ? (
+                <p className="text-gray-500 font-bold text-center py-8">No practice recorded yet. Complete Spelling Snake or Spelling Bee to see your history here.</p>
+              ) : (
+                <ul className="space-y-6">
+                  {practiceHistory.map(({ date, records }) => (
+                    <li key={date}>
+                      <div className="text-sm font-black text-amber-600 uppercase tracking-widest mb-2">
+                        {new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                      </div>
+                      <ul className="space-y-1.5">
+                        {records.map((r, i) => (
+                          <li key={`${date}-${i}`} className="flex items-center gap-2 text-gray-900">
+                            <span className={r.correct ? 'text-emerald-500' : 'text-red-500'}>{r.correct ? '✓' : '✗'}</span>
+                            <span className="font-bold">{r.word}</span>
+                            <span className="text-xs text-gray-400">
+                              {r.activity_type === 'spelling_snake' ? 'Snake' : r.activity_type === 'spelling_bee' ? 'Bee' : r.activity_type}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

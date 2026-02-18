@@ -58,3 +58,14 @@ export interface VocabQuestCompletion {
   score: number;
   completed_at?: string;
 }
+
+export interface VocabPracticeRecord {
+  id: string;
+  student_id: string;
+  word_id: string;
+  practice_date: string;
+  activity_type: 'spelling_snake' | 'spelling_bee' | 'flashcard' | 'quiz';
+  correct: boolean;
+  details?: Record<string, unknown>;
+  created_at?: string;
+}

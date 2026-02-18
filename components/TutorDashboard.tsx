@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { WordEntry, YearGroup } from '../types';
 import { generateWordExplanation, extractVocabularyFromFile, generateDailySpellingList } from '../geminiService';
-import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests } from '../lib/supabaseQueries';
+import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests, getStudentProgress, getStudentPracticeHistoryByDate } from '../lib/supabaseQueries';
 import { VocabWord } from '../lib/supabase';
 
 interface TutorDashboardProps {
@@ -58,6 +58,11 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const [enrichingWordId, setEnrichingWordId] = useState<string | null>(null);
   const [enrichingAll, setEnrichingAll] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  // Student progress (points, streak, practice history)
+  const [studentProgress, setStudentProgress] = useState<{ points: number; streak: number } | null>(null);
+  const [practiceHistory, setPracticeHistory] = useState<Array<{ date: string; records: Array<{ word: string; activity_type: string; correct: boolean }> }>>([]);
+  const [progressSectionOpen, setProgressSectionOpen] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(false);
 
   // Load words from Supabase on mount
   useEffect(() => {
@@ -83,6 +88,36 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
     setSelectedPastDate(null);
     setPastQuestDetail([]);
   }, [studentId]);
+
+  // Load student progress (points, streak) and practice history when section is opened or student changes
+  useEffect(() => {
+    if (!studentId) return;
+    if (!progressSectionOpen) {
+      setStudentProgress(null);
+      setPracticeHistory([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingProgress(true);
+    Promise.all([
+      getStudentProgress(studentId),
+      getStudentPracticeHistoryByDate(studentId, 30)
+    ])
+      .then(([progress, history]) => {
+        if (!cancelled) {
+          setStudentProgress(progress ? { points: progress.points, streak: progress.streak } : null);
+          setPracticeHistory(history);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStudentProgress(null);
+          setPracticeHistory([]);
+        }
+      })
+      .finally(() => { if (!cancelled) setLoadingProgress(false); });
+    return () => { cancelled = true; };
+  }, [studentId, progressSectionOpen]);
 
   // Load past quest dates when section is opened
   useEffect(() => {
@@ -755,6 +790,69 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
           <button onClick={() => setSuccessMessage(null)} className="text-emerald-600 hover:text-emerald-800 font-bold" aria-label="Dismiss">×</button>
         </div>
       )}
+
+      {/* Student progress (points, streak, practice history) */}
+      <div className="bg-indigo-50 border-2 border-indigo-200 rounded-[2rem] overflow-hidden shadow-sm">
+        <button
+          type="button"
+          onClick={() => setProgressSectionOpen(prev => !prev)}
+          className="w-full px-6 py-4 flex items-center justify-between gap-3 text-left hover:bg-indigo-100 transition-colors"
+        >
+          <h3 className="font-black text-indigo-900 uppercase text-xs tracking-widest flex items-center gap-2">
+            <span className="text-lg">📊</span> Student progress
+          </h3>
+          <span className="text-indigo-500 font-bold text-sm">{progressSectionOpen ? '▼' : '▶'}</span>
+        </button>
+        {progressSectionOpen && (
+          <div className="px-6 pb-6 pt-0 border-t border-indigo-200">
+            {loadingProgress ? (
+              <p className="text-indigo-600 text-sm py-4">Loading…</p>
+            ) : (
+              <div className="space-y-6 pt-4">
+                {studentProgress != null && (
+                  <div className="flex flex-wrap gap-6">
+                    <div className="bg-white border-2 border-indigo-200 rounded-2xl px-6 py-4 shadow-sm">
+                      <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Quest points</span>
+                      <div className="text-3xl font-black text-indigo-900">{studentProgress.points}</div>
+                    </div>
+                    <div className="bg-white border-2 border-amber-200 rounded-2xl px-6 py-4 shadow-sm">
+                      <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">Streak</span>
+                      <div className="text-3xl font-black text-amber-900">{studentProgress.streak} day{studentProgress.streak !== 1 ? 's' : ''}</div>
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <h4 className="text-sm font-black text-indigo-800 uppercase tracking-widest mb-3">Practice history (Spelling Snake & Bee)</h4>
+                  {practiceHistory.length === 0 ? (
+                    <p className="text-indigo-600/80 text-sm">No practice recorded yet. The student will see their history under &quot;My practice&quot; after completing activities.</p>
+                  ) : (
+                    <ul className="space-y-4">
+                      {practiceHistory.map(({ date, records }) => (
+                        <li key={date} className="bg-white rounded-xl border-2 border-indigo-100 p-4">
+                          <div className="text-xs font-black text-indigo-600 uppercase tracking-widest mb-2">
+                            {new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                          </div>
+                          <ul className="space-y-1.5">
+                            {records.map((r, i) => (
+                              <li key={`${date}-${i}`} className="flex items-center gap-2 text-gray-900 text-sm">
+                                <span className={r.correct ? 'text-emerald-500 font-bold' : 'text-red-500 font-bold'}>{r.correct ? '✓' : '✗'}</span>
+                                <span className="font-bold">{r.word}</span>
+                                <span className="text-xs text-gray-400">
+                                  {r.activity_type === 'spelling_snake' ? 'Snake' : r.activity_type === 'spelling_bee' ? 'Bee' : r.activity_type}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Today's Daily Quest – words the student will see */}
       {dailyWordIds.length > 0 && (

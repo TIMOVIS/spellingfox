@@ -2,11 +2,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { WordEntry } from '../types';
 import { speakText } from '../geminiService';
+import type { WordPracticeResult } from '../lib/supabaseQueries';
 
 interface SpellingModalProps {
   wordEntries: WordEntry[];
   onClose: () => void;
-  onFinish: (points: number) => void;
+  onFinish: (points: number, wordResults?: WordPracticeResult[]) => void;
 }
 
 interface LetterNode {
@@ -39,6 +40,8 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
   const [snake, setSnake] = useState(INITIAL_SNAKE);
   const [activeLetters, setActiveLetters] = useState<LetterNode[]>([]);
   const [collectedLetters, setCollectedLetters] = useState<string[]>([]);
+  /** Accumulated results for each completed word (for practice history). */
+  const [wordResults, setWordResults] = useState<WordPracticeResult[]>([]);
 
   // Touch Tracking
   const lastTouchPos = useRef<{ x: number, y: number } | null>(null);
@@ -127,9 +130,14 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
     setSnake(prev => {
       const head = prev[0];
       const newHead = {
-        x: (head.x + dx + GRID_SIZE) % GRID_SIZE,
-        y: (head.y + dy + GRID_SIZE) % GRID_SIZE
+        x: head.x + dx,
+        y: head.y + dy
       };
+
+      // Stay at border: don't wrap; reject move if it would go off the grid
+      if (newHead.x < 0 || newHead.x >= GRID_SIZE || newHead.y < 0 || newHead.y >= GRID_SIZE) {
+        return prev;
+      }
 
       // Don't allow moving into the neck
       if (prev.length > 1 && newHead.x === prev[1].x && newHead.y === prev[1].y) {
@@ -259,12 +267,20 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
   const nextWord = () => {
     setFeedback(null);
     const hadMistake = hadMistakeOnCurrentWord;
+    const completedWord = currentWord;
+    const result: WordPracticeResult = {
+      wordId: completedWord.id,
+      word: completedWord.word,
+      correct: !hadMistake
+    };
+    const nextResults = [...wordResults, result];
+    setWordResults(nextResults);
     const nextQueue = hadMistake ? [...queue.slice(1), queue[0]] : queue.slice(1);
     setQueue(nextQueue);
     setHadMistakeOnCurrentWord(false);
     setAdvanceCounter(c => c + 1);
     if (nextQueue.length === 0) {
-      onFinish(score);
+      onFinish(score, nextResults);
     }
   };
 

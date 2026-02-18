@@ -109,6 +109,24 @@ CREATE TABLE vocab_quest_completions (
 CREATE INDEX idx_vocab_quest_completions_daily_quest_id ON vocab_quest_completions(daily_quest_id);
 
 -- ============================================
+-- PRACTICE RECORDS TABLE (student history: which day, which words, right/wrong)
+-- ============================================
+CREATE TABLE vocab_practice_records (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    student_id UUID NOT NULL REFERENCES vocab_students(id) ON DELETE CASCADE,
+    word_id UUID NOT NULL REFERENCES vocab_words(id) ON DELETE CASCADE,
+    practice_date DATE NOT NULL,
+    activity_type TEXT NOT NULL CHECK (activity_type IN ('spelling_snake', 'spelling_bee', 'flashcard', 'quiz')),
+    correct BOOLEAN NOT NULL,
+    details JSONB DEFAULT '{}',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_vocab_practice_records_student_id ON vocab_practice_records(student_id);
+CREATE INDEX idx_vocab_practice_records_practice_date ON vocab_practice_records(practice_date);
+CREATE INDEX idx_vocab_practice_records_student_date ON vocab_practice_records(student_id, practice_date);
+
+-- ============================================
 -- TRIGGERS
 -- ============================================
 -- Auto-update updated_at timestamp
@@ -138,6 +156,7 @@ ALTER TABLE vocab_students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vocab_student_progress ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vocab_daily_quests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vocab_quest_completions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vocab_practice_records ENABLE ROW LEVEL SECURITY;
 
 -- Words: Public read, authenticated write
 CREATE POLICY "Words are viewable by everyone"
@@ -199,6 +218,19 @@ CREATE POLICY "Quest completions are viewable by authenticated users"
 CREATE POLICY "Quest completions can be inserted by authenticated users"
     ON vocab_quest_completions FOR INSERT
     WITH CHECK (auth.role() = 'authenticated');
+
+-- Practice records: same as other student data
+CREATE POLICY "Practice records are viewable by authenticated users"
+    ON vocab_practice_records FOR SELECT
+    USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Practice records can be inserted by authenticated users"
+    ON vocab_practice_records FOR INSERT
+    WITH CHECK (auth.role() = 'authenticated');
+
+CREATE POLICY "Practice records can be updated by authenticated users"
+    ON vocab_practice_records FOR UPDATE
+    USING (auth.role() = 'authenticated');
 
 -- ============================================
 -- HELPER FUNCTIONS

@@ -1,4 +1,4 @@
-import { supabase, VocabWord, VocabStudent, VocabStudentProgress, VocabDailyQuest } from './supabase';
+import { supabase, VocabWord, VocabStudent, VocabStudentProgress, VocabDailyQuest, VocabPracticeRecord } from './supabase';
 
 /** App timezone: London (Europe/London). */
 const LONDON_TIMEZONE = 'Europe/London';
@@ -349,4 +349,63 @@ export const markDailyQuestCompleted = async (
     .eq('quest_date', date);
   
   if (error) throw error;
+};
+
+// ============================================
+// PRACTICE RECORDS (student history: which day, which words, right/wrong)
+// ============================================
+
+export type PracticeActivityType = 'spelling_snake' | 'spelling_bee' | 'flashcard' | 'quiz';
+
+export interface WordPracticeResult {
+  wordId: string;
+  word: string;
+  correct: boolean;
+}
+
+/** Save one practice record per word (e.g. after spelling snake or spelling bee). */
+export const savePracticeRecords = async (
+  studentId: string,
+  activityType: PracticeActivityType,
+  wordResults: WordPracticeResult[],
+  date: string = getTodayLondonDate()
+): Promise<void> => {
+  if (wordResults.length === 0) return;
+  const rows = wordResults.map(({ wordId, word, correct }) => ({
+    student_id: studentId,
+    word_id: wordId,
+    practice_date: date,
+    activity_type: activityType,
+    correct,
+    details: { word }
+  }));
+  const { error } = await supabase.from('vocab_practice_records').insert(rows);
+  if (error) throw error;
+};
+
+/** Get practice history for a student, grouped by date (most recent first). */
+export const getStudentPracticeHistoryByDate = async (
+  studentId: string,
+  limitDays: number = 30
+): Promise<{ date: string; records: (VocabPracticeRecord & { word: string })[] }[]> => {
+  const { data, error } = await supabase
+    .from('vocab_practice_records')
+    .select('id, word_id, practice_date, activity_type, correct, details')
+    .eq('student_id', studentId)
+    .order('practice_date', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  type Row = VocabPracticeRecord & { details?: { word?: string } };
+  const list = (data || []) as Row[];
+  const byDate = new Map<string, (VocabPracticeRecord & { word: string })[]>();
+  for (const r of list) {
+    const date = r.practice_date;
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date)!.push({
+      ...r,
+      word: (r.details && typeof r.details === 'object' && 'word' in r.details && r.details.word) || '?'
+    });
+  }
+  const sortedDates = [...byDate.keys()].sort((a, b) => b.localeCompare(a)).slice(0, limitDays);
+  return sortedDates.map(date => ({ date, records: byDate.get(date)! }));
 };
