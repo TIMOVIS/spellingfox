@@ -18,7 +18,7 @@ interface StudentDashboardProps {
 type PracticeDay = { date: string; records: { word: string; activity_type: string; correct: boolean }[] };
 
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wordBank, dailyWordIds, onCompleteExercise }) => {
-  const [viewMode, setViewMode] = useState<'hub' | 'wordList'>('hub');
+  const [viewMode, setViewMode] = useState<'hub' | 'wordList' | 'extraWords'>('hub');
   const [showSpelling, setShowSpelling] = useState(false);
   const [showSpellingBee, setShowSpellingBee] = useState(false);
   const [activeFlashcard, setActiveFlashcard] = useState<WordEntry | null>(null);
@@ -26,6 +26,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
   const [quizWords, setQuizWords] = useState<string[]>([]);
   const [practiceHistory, setPracticeHistory] = useState<PracticeDay[]>([]);
   const [showPracticeHistory, setShowPracticeHistory] = useState(false);
+  /** Words to use in Spelling modal (daily quest or single word from flashcard/extra). */
+  const [wordsForSpelling, setWordsForSpelling] = useState<WordEntry[]>([]);
 
   useEffect(() => {
     if (!studentId) return;
@@ -68,11 +70,17 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
     return wordBank.filter(w => dailyWordIds.includes(w.id));
   }, [wordBank, dailyWordIds]);
 
+  /** Words not in today's quest – for "Learn more words" (able students). */
+  const extraWords = useMemo(() => {
+    return wordBank.filter(w => !dailyWordIds.includes(w.id));
+  }, [wordBank, dailyWordIds]);
+
   // Mock progress based on current session points for visual feedback
   const progressPercent = Math.min(100, (dailyWords.length > 0 ? 60 : 0)); 
 
   const handleStartSpellingOnly = () => {
     if (dailyWords.length > 0) {
+      setWordsForSpelling(dailyWords);
       setShowSpelling(true);
     }
   };
@@ -88,6 +96,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
   };
 
   const handleSpellingFromFlashcard = (word: WordEntry) => {
+    setWordsForSpelling([word]);
     setActiveFlashcard(null);
     setShowSpelling(true);
   };
@@ -135,8 +144,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black mb-1">Daily Quest</span>
-                    <span className="text-indigo-200 font-bold">Learn & Master {dailyWords.length} Words</span>
+                    <span className="block text-3xl font-black">To do 1: Daily Quest</span>
                   </div>
                   <span className="text-5xl group-hover:translate-x-2 transition-transform">🎯</span>
                 </div>
@@ -149,8 +157,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black mb-1">Spelling Snake</span>
-                    <span className="text-orange-600/70 font-bold uppercase tracking-widest text-xs">Jump straight to the game</span>
+                    <span className="block text-3xl font-black">To do 2: Spelling Snake</span>
                   </div>
                   <span className="text-5xl group-hover:rotate-12 transition-transform">🐍</span>
                 </div>
@@ -163,12 +170,26 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black mb-1">Spelling Bee</span>
-                    <span className="text-amber-600/70 font-bold uppercase tracking-widest text-xs">Type the letters</span>
+                    <span className="block text-3xl font-black">To do 3: Spelling Bee</span>
                   </div>
                   <span className="text-5xl group-hover:scale-110 transition-transform">🐝</span>
                 </div>
               </button>
+
+              {extraWords.length > 0 && (
+                <button 
+                  onClick={() => setViewMode('extraWords')}
+                  className="group relative bg-violet-100 hover:bg-violet-200 text-violet-800 p-6 rounded-[2rem] transition-all hover:scale-[1.01] active:scale-[0.99] shadow border-2 border-violet-200 overflow-hidden"
+                >
+                  <div className="relative z-10 flex items-center justify-between">
+                    <div className="text-left">
+                      <span className="block text-xl font-black mb-0.5">Learn more words</span>
+                      <span className="text-violet-600/80 font-bold text-xs">Explore {extraWords.length} extra word{extraWords.length !== 1 ? 's' : ''} on your own</span>
+                    </div>
+                    <span className="text-3xl">📚</span>
+                  </div>
+                </button>
+              )}
 
               {studentId && (
                 <button 
@@ -191,7 +212,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
             <p className="text-gray-400 text-[10px] font-black uppercase tracking-[0.2em]">Curriculum words provided by your teacher</p>
           </div>
         </div>
-      ) : (
+      ) : viewMode === 'wordList' ? (
         <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
           <div className="flex items-center justify-between mb-8">
             <button 
@@ -231,12 +252,48 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
             )}
           </div>
         </div>
+      ) : (
+        /* Learn more words (extra words not in today's quest) */
+        <div className="space-y-6 animate-in fade-in zoom-in-95 duration-300">
+          <div className="flex items-center justify-between mb-8">
+            <button 
+              onClick={() => setViewMode('hub')}
+              className="bg-white border-2 border-gray-200 text-gray-500 px-6 py-3 rounded-2xl font-black hover:bg-gray-50 flex items-center gap-2 active:scale-95 transition-all shadow-sm"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7" />
+              </svg>
+              BACK TO HUB
+            </button>
+            <h2 className="text-2xl font-black text-violet-900 tracking-tight">Learn more words 📚</h2>
+          </div>
+
+          <p className="text-violet-700/90 font-medium text-sm">Explore these words from the curriculum on your own. Tap <strong>Learn</strong> to see the word, meaning, and examples.</p>
+
+          <div className="space-y-4">
+            {extraWords.map((word) => (
+              <div key={word.id} className="bg-white p-6 rounded-[2rem] shadow-md border-2 border-violet-50 flex items-center justify-between group hover:border-violet-200 transition-all">
+                <div className="flex flex-col min-w-0">
+                  <span className="text-2xl font-black text-gray-900 tracking-tight">{word.word}</span>
+                  <span className="text-[10px] font-black text-violet-500 uppercase tracking-widest">{word.learningPoint}</span>
+                </div>
+                <button 
+                  onClick={() => handleMasterWord(word)}
+                  className="bg-violet-600 text-white px-8 py-3 rounded-xl font-black shadow-md hover:bg-violet-700 hover:scale-105 active:scale-95 transition-all flex items-center gap-2 shrink-0"
+                >
+                  <span>LEARN</span>
+                  <span className="text-xl">🚀</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Modals */}
       {showSpelling && (
         <SpellingModal 
-          wordEntries={dailyWords}
+          wordEntries={wordsForSpelling.length > 0 ? wordsForSpelling : dailyWords}
           onClose={() => setShowSpelling(false)}
           onFinish={(pts, wordResults) => {
             onCompleteExercise(pts, wordResults?.length ? { wordResults, activityType: 'spelling_snake' } : undefined);
