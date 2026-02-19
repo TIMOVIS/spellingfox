@@ -28,6 +28,11 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
   const [showPracticeHistory, setShowPracticeHistory] = useState(false);
   /** Words to use in Spelling modal (daily quest or single word from flashcard/extra). */
   const [wordsForSpelling, setWordsForSpelling] = useState<WordEntry[]>([]);
+  /** Filters on "Learn more words" page */
+  const [extraYearFilter, setExtraYearFilter] = useState<string>('all');
+  const [extraPatternFilter, setExtraPatternFilter] = useState<string>('all');
+  const [extraSearch, setExtraSearch] = useState('');
+  const [extraWordsPage, setExtraWordsPage] = useState(1);
 
   useEffect(() => {
     if (!studentId) return;
@@ -74,6 +79,45 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
   const extraWords = useMemo(() => {
     return wordBank.filter(w => !dailyWordIds.includes(w.id));
   }, [wordBank, dailyWordIds]);
+
+  /** Unique year groups and learning points in extra words (for filter dropdowns). */
+  const extraYearGroups = useMemo(() => 
+    Array.from(new Set(extraWords.map(w => w.yearGroup))).sort(), 
+    [extraWords]
+  );
+  const extraLearningPoints = useMemo(() => 
+    Array.from(new Set(extraWords.map(w => w.learningPoint))).sort(), 
+    [extraWords]
+  );
+
+  /** Filtered extra words (year, pattern, search). */
+  const filteredExtraWords = useMemo(() => {
+    return extraWords.filter(w => {
+      if (extraYearFilter !== 'all' && w.yearGroup !== extraYearFilter) return false;
+      if (extraPatternFilter !== 'all' && w.learningPoint !== extraPatternFilter) return false;
+      if (extraSearch.trim()) {
+        const q = extraSearch.trim().toLowerCase();
+        const matchWord = w.word.toLowerCase().includes(q);
+        const matchDef = w.definition?.toLowerCase().includes(q);
+        const matchPoint = w.learningPoint?.toLowerCase().includes(q);
+        const matchRoot = w.root?.toLowerCase().includes(q);
+        if (!matchWord && !matchDef && !matchPoint && !matchRoot) return false;
+      }
+      return true;
+    });
+  }, [extraWords, extraYearFilter, extraPatternFilter, extraSearch]);
+
+  const WORDS_PER_PAGE = 30;
+  const extraTotalPages = Math.max(1, Math.ceil(filteredExtraWords.length / WORDS_PER_PAGE));
+  const paginatedExtraWords = useMemo(() => {
+    const start = (extraWordsPage - 1) * WORDS_PER_PAGE;
+    return filteredExtraWords.slice(start, start + WORDS_PER_PAGE);
+  }, [filteredExtraWords, extraWordsPage]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setExtraWordsPage(1);
+  }, [extraYearFilter, extraPatternFilter, extraSearch]);
 
   // Mock progress based on current session points for visual feedback
   const progressPercent = Math.min(100, (dailyWords.length > 0 ? 60 : 0)); 
@@ -268,24 +312,108 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
             <h2 className="text-2xl font-black text-violet-900 tracking-tight">Learn more words 📚</h2>
           </div>
 
-          <p className="text-violet-700/90 font-medium text-sm">Explore these words from the curriculum on your own. Tap <strong>Learn</strong> to see the word, meaning, and examples.</p>
+          <p className="text-violet-700/90 font-medium text-sm">Explore words from the curriculum. Filter by year or pattern, or search. Tap <strong>Learn</strong> to see the word, meaning, and examples.</p>
+
+          {/* Filters */}
+          <div className="bg-white rounded-2xl border-2 border-violet-100 p-4 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-black text-violet-600 uppercase tracking-widest shrink-0">Filters</span>
+              {(extraYearFilter !== 'all' || extraPatternFilter !== 'all' || extraSearch.trim()) && (
+                <button
+                  onClick={() => { setExtraYearFilter('all'); setExtraPatternFilter('all'); setExtraSearch(''); }}
+                  className="text-violet-600 hover:text-violet-800 font-bold text-sm"
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input
+                type="text"
+                placeholder="Search words..."
+                value={extraSearch}
+                onChange={(e) => setExtraSearch(e.target.value)}
+                className="bg-gray-50 border-2 border-violet-100 rounded-xl px-4 py-2.5 font-medium text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none text-sm sm:col-span-2"
+              />
+              <select
+                value={extraYearFilter}
+                onChange={(e) => setExtraYearFilter(e.target.value)}
+                className="bg-gray-50 border-2 border-violet-100 rounded-xl px-4 py-2.5 font-bold text-gray-900 text-sm cursor-pointer focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none"
+              >
+                <option value="all">All year groups</option>
+                {extraYearGroups.map(yg => (
+                  <option key={yg} value={yg}>{yg}</option>
+                ))}
+              </select>
+              <select
+                value={extraPatternFilter}
+                onChange={(e) => setExtraPatternFilter(e.target.value)}
+                className="bg-gray-50 border-2 border-violet-100 rounded-xl px-4 py-2.5 font-bold text-gray-900 text-sm cursor-pointer focus:ring-2 focus:ring-violet-400 focus:border-violet-400 outline-none sm:col-span-2"
+              >
+                <option value="all">All patterns</option>
+                {extraLearningPoints.map(lp => (
+                  <option key={lp} value={lp}>{lp}</option>
+                ))}
+              </select>
+              <span className="text-xs font-bold text-violet-600 self-center">
+                {filteredExtraWords.length} word{filteredExtraWords.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+          </div>
 
           <div className="space-y-4">
-            {extraWords.map((word) => (
-              <div key={word.id} className="bg-white p-6 rounded-[2rem] shadow-md border-2 border-violet-50 flex items-center justify-between group hover:border-violet-200 transition-all">
-                <div className="flex flex-col min-w-0">
-                  <span className="text-2xl font-black text-gray-900 tracking-tight">{word.word}</span>
-                  <span className="text-[10px] font-black text-violet-500 uppercase tracking-widest">{word.learningPoint}</span>
-                </div>
-                <button 
-                  onClick={() => handleMasterWord(word)}
-                  className="bg-violet-600 text-white px-8 py-3 rounded-xl font-black shadow-md hover:bg-violet-700 hover:scale-105 active:scale-95 transition-all flex items-center gap-2 shrink-0"
+            {filteredExtraWords.length === 0 ? (
+              <div className="text-center py-16 bg-white rounded-[2rem] border-2 border-dashed border-violet-100">
+                <span className="text-5xl block mb-3">🔍</span>
+                <p className="text-violet-700 font-black">No words match your filters</p>
+                <p className="text-violet-500 text-sm mt-1">Try a different year, pattern, or search.</p>
+                <button
+                  onClick={() => { setExtraYearFilter('all'); setExtraPatternFilter('all'); setExtraSearch(''); }}
+                  className="mt-4 bg-violet-100 text-violet-700 px-5 py-2 rounded-xl font-bold text-sm hover:bg-violet-200 transition-colors"
                 >
-                  <span>LEARN</span>
-                  <span className="text-xl">🚀</span>
+                  Clear filters
                 </button>
               </div>
-            ))}
+            ) : (
+              <>
+                {paginatedExtraWords.map((word) => (
+                  <div key={word.id} className="bg-white p-6 rounded-[2rem] shadow-md border-2 border-violet-50 flex items-center justify-between group hover:border-violet-200 transition-all">
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-2xl font-black text-gray-900 tracking-tight">{word.word}</span>
+                      <span className="text-[10px] font-black text-violet-500 uppercase tracking-widest">{word.learningPoint}</span>
+                    </div>
+                    <button 
+                      onClick={() => handleMasterWord(word)}
+                      className="bg-violet-600 text-white px-8 py-3 rounded-xl font-black shadow-md hover:bg-violet-700 hover:scale-105 active:scale-95 transition-all flex items-center gap-2 shrink-0"
+                    >
+                      <span>LEARN</span>
+                      <span className="text-xl">🚀</span>
+                    </button>
+                  </div>
+                ))}
+                {extraTotalPages > 1 && (
+                  <div className="flex items-center justify-center gap-4 pt-4 pb-2">
+                    <button
+                      onClick={() => setExtraWordsPage(p => Math.max(1, p - 1))}
+                      disabled={extraWordsPage <= 1}
+                      className="bg-violet-100 text-violet-700 px-5 py-2.5 rounded-xl font-black text-sm hover:bg-violet-200 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-sm font-bold text-violet-800">
+                      Page {extraWordsPage} of {extraTotalPages}
+                    </span>
+                    <button
+                      onClick={() => setExtraWordsPage(p => Math.min(extraTotalPages, p + 1))}
+                      disabled={extraWordsPage >= extraTotalPages}
+                      className="bg-violet-100 text-violet-700 px-5 py-2.5 rounded-xl font-black text-sm hover:bg-violet-200 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

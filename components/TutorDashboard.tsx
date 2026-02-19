@@ -46,6 +46,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const [filterYearGroup, setFilterYearGroup] = useState<string>('all');
   const [filterLearningPoint, setFilterLearningPoint] = useState<string>('all');
   const [filterSearch, setFilterSearch] = useState<string>('');
+  const [wordBankPage, setWordBankPage] = useState(1);
   const [editingWord, setEditingWord] = useState<WordEntry | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<WordEntry>>({});
   // Past daily quests
@@ -612,6 +613,18 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
     setFilterSearch('');
   };
 
+  const WORDS_PER_PAGE = 30;
+  const wordBankTotalPages = Math.max(1, Math.ceil(filteredWords.length / WORDS_PER_PAGE));
+  const paginatedWords = filteredWords.slice(
+    (wordBankPage - 1) * WORDS_PER_PAGE,
+    (wordBankPage - 1) * WORDS_PER_PAGE + WORDS_PER_PAGE
+  );
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setWordBankPage(1);
+  }, [filterYearGroup, filterLearningPoint, filterSearch]);
+
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-4 duration-500 pb-20">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -956,6 +969,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
             <div className="flex items-center gap-3 flex-wrap">
                <span className="bg-white px-4 py-1.5 rounded-full border text-xs font-black text-indigo-600 shadow-sm">
                  {filteredWords.length} {filteredWords.length === wordBank.length ? 'Words' : `of ${wordBank.length} Words`}
+                 {wordBankTotalPages > 1 && ` · Page ${wordBankPage} of ${wordBankTotalPages}`}
                </span>
                <span className="bg-amber-100 px-4 py-1.5 rounded-full border border-amber-200 text-xs font-black text-amber-700 shadow-sm">{dailyWordIds.length} Pin to Quest</span>
                {wordBank.some(needsEnriching) && (
@@ -1043,7 +1057,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {filteredWords.map(w => {
+              {paginatedWords.map(w => {
                 const isDaily = dailyWordIds.includes(w.id);
                 return (
                   <tr key={w.id} className={`transition-colors group text-sm ${isDaily ? 'bg-amber-50/30' : 'hover:bg-indigo-50/30'}`}>
@@ -1117,6 +1131,27 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
             </tbody>
           </table>
         </div>
+        {wordBank.length > 0 && filteredWords.length > 0 && wordBankTotalPages > 1 && (
+          <div className="flex items-center justify-center gap-4 px-8 py-4 border-t border-gray-100 bg-gray-50/50">
+            <button
+              onClick={() => setWordBankPage(p => Math.max(1, p - 1))}
+              disabled={wordBankPage <= 1}
+              className="bg-white border-2 border-indigo-200 text-indigo-700 px-5 py-2.5 rounded-xl font-black text-sm hover:bg-indigo-50 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+            >
+              Previous
+            </button>
+            <span className="text-sm font-bold text-gray-700">
+              Page {wordBankPage} of {wordBankTotalPages}
+            </span>
+            <button
+              onClick={() => setWordBankPage(p => Math.min(wordBankTotalPages, p + 1))}
+              disabled={wordBankPage >= wordBankTotalPages}
+              className="bg-white border-2 border-indigo-200 text-indigo-700 px-5 py-2.5 rounded-xl font-black text-sm hover:bg-indigo-50 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        )}
         {wordBank.length === 0 && (
           <div className="p-20 text-center">
             <div className="text-7xl mb-6">📚</div>
