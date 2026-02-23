@@ -139,16 +139,25 @@ const App: React.FC = () => {
     return () => { cancelled = true; };
   }, [state.role, currentStudentId]);
 
-  // When student tab gains focus, refresh daily quest so teacher-pinned words appear
+  // When student tab gains focus or becomes visible, refresh word bank and daily quest so teacher-pinned words (including newly added) appear
   useEffect(() => {
     if (state.role !== 'student' || !currentStudentId) return;
-    const onFocus = () => {
-      getDailyQuestWordIds(currentStudentId).then(ids => {
-        setState(prev => ({ ...prev, dailyWordIds: ids }));
-      }).catch(e => console.error('Failed to refresh daily quest on focus:', e));
+    const refreshStudentData = () => {
+      Promise.all([getAllWords(), getDailyQuestWordIds(currentStudentId)])
+        .then(([allWords, dailyWordIds]) => {
+          const wordEntries = allWords.map(convertVocabWordToWordEntry);
+          setState(prev => ({ ...prev, wordBank: wordEntries, dailyWordIds }));
+        })
+        .catch(e => console.error('Failed to refresh student data:', e));
     };
+    const onFocus = () => refreshStudentData();
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshStudentData(); };
     window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [state.role, currentStudentId]);
 
   const toggleRole = () => {
@@ -310,6 +319,23 @@ const App: React.FC = () => {
     }));
   };
 
+  /** Refetch selected student's daily quest from Supabase (e.g. after teacher adds and pins words). */
+  const refetchSelectedStudentDailyQuest = async () => {
+    const selected = getSelectedStudent();
+    if (!selected?.id) return;
+    try {
+      const ids = await getDailyQuestWordIds(selected.id);
+      setState(prev => ({
+        ...prev,
+        students: prev.students.map(s =>
+          s.id === selected.id ? { ...s, dailyWordIds: ids } : s
+        )
+      }));
+    } catch (e) {
+      console.error('Failed to refetch daily quest:', e);
+    }
+  };
+
   const toggleDailyWord = async (wordId: string) => {
     const selectedStudent = getSelectedStudent();
     if (!selectedStudent) return;
@@ -408,6 +434,7 @@ const App: React.FC = () => {
             dailyWordIds={getSelectedStudent()?.dailyWordIds || []}
             onUpdateWords={updateWordBank}
             onToggleDaily={toggleDailyWord}
+            onRefetchDailyQuest={refetchSelectedStudentDailyQuest}
             onBack={() => setState(prev => ({ ...prev, selectedStudentId: null }))}
           />
         ) : (

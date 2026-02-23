@@ -1,5 +1,8 @@
 -- Migration: Student practice history (which day, which words, right/wrong)
 -- Run this in Supabase SQL Editor if you already have the main schema.
+-- If "My practice" stays empty after completing Spelling Bee/Snake: run this
+-- migration (creates table if missing) and the anon policies at the end so the
+-- app can write/read practice records when using the anon key without Auth.
 
 -- ============================================
 -- PRACTICE RECORDS TABLE
@@ -32,3 +35,13 @@ CREATE POLICY "Practice records can be inserted by authenticated users"
 CREATE POLICY "Practice records can be updated by authenticated users"
     ON vocab_practice_records FOR UPDATE
     USING (auth.role() = 'authenticated');
+
+-- If your app uses the anon key without Supabase Auth, add these so practice history works:
+DROP POLICY IF EXISTS "Practice records anon select" ON vocab_practice_records;
+DROP POLICY IF EXISTS "Practice records anon insert" ON vocab_practice_records;
+CREATE POLICY "Practice records anon select"
+    ON vocab_practice_records FOR SELECT
+    USING (true);
+CREATE POLICY "Practice records anon insert"
+    ON vocab_practice_records FOR INSERT
+    WITH CHECK (true);

@@ -232,6 +232,14 @@ CREATE POLICY "Practice records can be updated by authenticated users"
     ON vocab_practice_records FOR UPDATE
     USING (auth.role() = 'authenticated');
 
+-- Allow anon (no Supabase Auth) so practice history works with the public anon key
+CREATE POLICY "Practice records anon select"
+    ON vocab_practice_records FOR SELECT
+    USING (true);
+CREATE POLICY "Practice records anon insert"
+    ON vocab_practice_records FOR INSERT
+    WITH CHECK (true);
+
 -- ============================================
 -- HELPER FUNCTIONS
 -- ============================================

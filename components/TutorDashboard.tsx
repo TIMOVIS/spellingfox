@@ -12,6 +12,7 @@ interface TutorDashboardProps {
   dailyWordIds: string[];
   onUpdateWords: (newWords: WordEntry[]) => void;
   onToggleDaily: (id: string) => void;
+  onRefetchDailyQuest?: () => Promise<void>;
   onBack: () => void;
 }
 
@@ -31,7 +32,7 @@ const convertVocabWordToWordEntry = (vocabWord: VocabWord): WordEntry => {
   };
 };
 
-const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId, wordBank, dailyWordIds, onUpdateWords, onToggleDaily, onBack }) => {
+const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId, wordBank, dailyWordIds, onUpdateWords, onToggleDaily, onRefetchDailyQuest, onBack }) => {
   const [newWord, setNewWord] = useState('');
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -207,14 +208,12 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
         // Find the newly added word and add to daily quest if needed
         const newWordEntry = wordEntries.find(w => w.word.toLowerCase() === fullWord.word.toLowerCase());
         if (newWordEntry && addToDailyByDefault) {
-          // Save to Supabase daily quest
           try {
             await toggleDailyQuestWord(studentId, newWordEntry.id);
-            // Update local state via callback
             onToggleDaily(newWordEntry.id);
+            await onRefetchDailyQuest?.();
           } catch (error) {
             console.error('Failed to add word to daily quest in Supabase:', error);
-            // Still update local state even if Supabase fails
             onToggleDaily(newWordEntry.id);
           }
         }
@@ -354,6 +353,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                     await toggleDailyQuestWord(studentId, wordId);
                     onToggleDaily(wordId);
                   }
+                  await onRefetchDailyQuest?.();
                 } catch (dailyQuestErr) {
                   console.error('Failed to add words to daily quest:', dailyQuestErr);
                 }
