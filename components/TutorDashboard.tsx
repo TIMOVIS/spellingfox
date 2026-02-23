@@ -185,7 +185,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
       
       // Add to Supabase with etymology, morphology, and letter strings
       try {
-        await addWordToSupabase({
+        const addedWord = await addWordToSupabase({
           word: fullWord.word,
           definition: fullWord.definition,
           root: fullWord.root,
@@ -199,22 +199,21 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
           etymology: (aiData as any).etymology || null,
           morphology: (aiData as any).morphology || null
         });
-        
-        // Reload words from Supabase to get the new word with its ID
+
+        // Reload words from Supabase so word bank includes the new word
         const vocabWords = await getAllWords();
         const wordEntries = vocabWords.map(convertVocabWordToWordEntry);
         onUpdateWords(wordEntries);
-        
-        // Find the newly added word and add to daily quest if needed
-        const newWordEntry = wordEntries.find(w => w.word.toLowerCase() === fullWord.word.toLowerCase());
-        if (newWordEntry && addToDailyByDefault) {
+
+        // Pin to daily quest using the ID from the insert response (reliable)
+        if (addToDailyByDefault && addedWord?.id) {
           try {
-            await toggleDailyQuestWord(studentId, newWordEntry.id);
-            onToggleDaily(newWordEntry.id);
+            await toggleDailyQuestWord(studentId, addedWord.id);
+            onToggleDaily(addedWord.id);
             await onRefetchDailyQuest?.();
           } catch (error) {
             console.error('Failed to add word to daily quest in Supabase:', error);
-            onToggleDaily(newWordEntry.id);
+            onToggleDaily(addedWord.id);
           }
         }
         
