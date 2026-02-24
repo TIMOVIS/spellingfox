@@ -10,6 +10,8 @@ interface TutorDashboardProps {
   studentId: string;
   wordBank: WordEntry[];
   dailyWordIds: string[];
+  allStudents: { id: string; name: string }[];
+  onBulkAssignDailyQuest: (studentIds: string[], wordIds: string[]) => Promise<void>;
   onUpdateWords: (newWords: WordEntry[]) => void;
   onToggleDaily: (id: string) => void;
   onRefetchDailyQuest?: () => Promise<void>;
@@ -32,9 +34,12 @@ const convertVocabWordToWordEntry = (vocabWord: VocabWord): WordEntry => {
   };
 };
 
-const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId, wordBank, dailyWordIds, onUpdateWords, onToggleDaily, onRefetchDailyQuest, onBack }) => {
+const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId, wordBank, dailyWordIds, allStudents, onBulkAssignDailyQuest, onUpdateWords, onToggleDaily, onRefetchDailyQuest, onBack }) => {
   const [newWord, setNewWord] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showBulkAssignModal, setShowBulkAssignModal] = useState(false);
+  const [bulkAssignSelectedIds, setBulkAssignSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkAssigning, setBulkAssigning] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [generatingDaily, setGeneratingDaily] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -876,7 +881,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
             </span>
           </h3>
           <p className="text-amber-800/80 text-sm font-medium mb-3">Words {studentName} will see in their daily list. Unpin from the table below to remove.</p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2 mb-4">
             {wordBank
               .filter(w => dailyWordIds.includes(w.id))
               .map(w => (
@@ -887,6 +892,77 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                   {w.word}
                 </span>
               ))}
+          </div>
+          {allStudents.filter(s => s.id !== studentId).length > 0 && (
+            <button
+              type="button"
+              onClick={() => { setBulkAssignSelectedIds(new Set()); setShowBulkAssignModal(true); }}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2.5 rounded-xl font-black text-sm shadow-sm transition-colors"
+            >
+              Assign this daily quest to other students
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Bulk assign daily quest modal */}
+      {showBulkAssignModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="p-6 border-b border-gray-100">
+              <h3 className="text-xl font-black text-gray-900">Assign daily quest to students</h3>
+              <p className="text-sm text-gray-600 mt-1">Select students to receive the same {dailyWordIds.length} word{dailyWordIds.length !== 1 ? 's' : ''} as {studentName}.</p>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              <div className="space-y-2">
+                {allStudents
+                  .filter(s => s.id !== studentId)
+                  .map(s => (
+                    <label key={s.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-gray-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={bulkAssignSelectedIds.has(s.id)}
+                        onChange={() => setBulkAssignSelectedIds(prev => {
+                          const next = new Set(prev);
+                          if (next.has(s.id)) next.delete(s.id);
+                          else next.add(s.id);
+                          return next;
+                        })}
+                        className="w-5 h-5 rounded border-gray-300 text-amber-600 focus:ring-amber-500"
+                      />
+                      <span className="font-bold text-gray-900">{s.name}</span>
+                    </label>
+                  ))}
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-100 flex gap-3 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowBulkAssignModal(false)}
+                className="px-5 py-2.5 rounded-xl font-bold border-2 border-gray-200 text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={bulkAssignSelectedIds.size === 0 || bulkAssigning}
+                onClick={async () => {
+                  if (bulkAssignSelectedIds.size === 0) return;
+                  setBulkAssigning(true);
+                  try {
+                    await onBulkAssignDailyQuest([...bulkAssignSelectedIds], dailyWordIds);
+                    setShowBulkAssignModal(false);
+                  } catch (e) {
+                    setError('Failed to assign daily quest. Please try again.');
+                  } finally {
+                    setBulkAssigning(false);
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl font-black bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 disabled:pointer-events-none"
+              >
+                {bulkAssigning ? 'Assigning…' : `Assign to ${bulkAssignSelectedIds.size} student${bulkAssignSelectedIds.size !== 1 ? 's' : ''}`}
+              </button>
+            </div>
           </div>
         </div>
       )}

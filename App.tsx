@@ -6,10 +6,10 @@ import StudentNameEntry from './components/StudentNameEntry';
 import TutorDashboard from './components/TutorDashboard';
 import StudentSelector from './components/StudentSelector';
 import Navbar from './components/Navbar';
-import { toggleDailyQuestWord, addStudent as addStudentToSupabase, deleteStudent as deleteStudentFromSupabase, getAllStudents, getStudentProgress, getDailyQuestWordIds, getStudent, addPointsToStudent, savePracticeRecords } from './lib/supabaseQueries';
+import { toggleDailyQuestWord, assignWordsToDailyQuest, addStudent as addStudentToSupabase, deleteStudent as deleteStudentFromSupabase, getAllStudents, getStudentProgress, getDailyQuestWordIds, getStudent, addPointsToStudent, savePracticeRecords } from './lib/supabaseQueries';
 import type { WordPracticeResult, PracticeActivityType } from './lib/supabaseQueries';
 import { getAllWords } from './lib/supabaseQueries';
-import { VocabWord } from './lib/supabase';
+import { supabase, VocabWord } from './lib/supabase';
 
 const INITIAL_WORD_BANK: WordEntry[] = [
   {
@@ -160,15 +160,64 @@ const App: React.FC = () => {
     };
   }, [state.role, currentStudentId]);
 
+  // Realtime: when teacher assigns words (daily quest or new word), student view updates without refocusing
+  useEffect(() => {
+    if (state.role !== 'student' || !currentStudentId) return;
+    const refresh = () => {
+      Promise.all([getAllWords(), getDailyQuestWordIds(currentStudentId)])
+        .then(([allWords, dailyWordIds]) => {
+          const wordEntries = allWords.map(convertVocabWordToWordEntry);
+          setState(prev => ({ ...prev, wordBank: wordEntries, dailyWordIds }));
+        })
+        .catch(e => console.error('Realtime refresh failed:', e));
+    };
+    const channel = supabase
+      .channel(`student-data-${currentStudentId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'vocab_daily_quests',
+          filter: `student_id=eq.${currentStudentId}`
+        },
+        refresh
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'vocab_words' },
+        refresh
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [state.role, currentStudentId]);
+
   const toggleRole = () => {
     setState(prev => {
       if (prev.role === 'tutor') {
-        // When switching from tutor to student, clear selected student and reset name entry
+        // When switching from tutor to student: if a student was selected, show their dashboard (and refetch will run)
+        const sid = prev.selectedStudentId;
+        const s = sid ? prev.students.find(x => x.id === sid) : null;
+        if (s) {
+          setCurrentStudentId(sid!);
+          setStudentEnteredName(true);
+          return {
+            ...prev,
+            role: 'student',
+            studentName: s.name,
+            wordBank: s.wordBank,
+            dailyWordIds: s.dailyWordIds,
+            points: s.points,
+            streak: s.streak
+          };
+        }
         setStudentEnteredName(false);
         setCurrentStudentId(null);
-        return { 
-          ...prev, 
-          role: 'student', 
+        return {
+          ...prev,
+          role: 'student',
           selectedStudentId: null,
           studentName: '',
           points: 0,
@@ -177,7 +226,6 @@ const App: React.FC = () => {
           dailyWordIds: []
         };
       } else {
-        // When switching to tutor, keep selected student if any
         return { ...prev, role: 'tutor' };
       }
     });
@@ -336,6 +384,25 @@ const App: React.FC = () => {
     }
   };
 
+  /** Assign the same daily quest (word IDs) to multiple students. */
+  const bulkAssignDailyQuest = async (studentIds: string[], wordIds: string[]) => {
+    if (wordIds.length === 0 || studentIds.length === 0) return;
+    try {
+      for (const id of studentIds) {
+        await assignWordsToDailyQuest(id, wordIds);
+      }
+      setState(prev => ({
+        ...prev,
+        students: prev.students.map(s =>
+          studentIds.includes(s.id) ? { ...s, dailyWordIds: wordIds } : s
+        )
+      }));
+    } catch (e) {
+      console.error('Failed to bulk assign daily quest:', e);
+      throw e;
+    }
+  };
+
   const toggleDailyWord = async (wordId: string) => {
     const selectedStudent = getSelectedStudent();
     if (!selectedStudent) return;
@@ -432,6 +499,8 @@ const App: React.FC = () => {
             studentId={state.selectedStudentId}
             wordBank={getSelectedStudent()?.wordBank || []} 
             dailyWordIds={getSelectedStudent()?.dailyWordIds || []}
+            allStudents={state.students.map(s => ({ id: s.id, name: s.name }))}
+            onBulkAssignDailyQuest={bulkAssignDailyQuest}
             onUpdateWords={updateWordBank}
             onToggleDaily={toggleDailyWord}
             onRefetchDailyQuest={refetchSelectedStudentDailyQuest}
