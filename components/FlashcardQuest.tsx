@@ -8,11 +8,14 @@ interface FlashcardQuestProps {
   onClose: () => void;
   onStartQuiz: (word: WordEntry) => void;
   onStartSpelling: (word: WordEntry) => void;
+  onStartSpellingBee: (word: WordEntry) => void;
+  /** Called when the user closes after viewing (so Daily Quest progress can record flashcard practice). */
+  onWordViewed?: (word: WordEntry) => void;
 }
 
 type Step = 'word' | 'meaning' | 'example' | 'synonyms' | 'antonyms';
 
-const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQuiz, onStartSpelling }) => {
+const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQuiz, onStartSpelling, onStartSpellingBee, onWordViewed }) => {
   const [step, setStep] = useState<Step>('word');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [activeLetterIndex, setActiveLetterIndex] = useState<number>(-1);
@@ -256,6 +259,12 @@ const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQ
               >
                 <span>🐍</span> SPELLING SNAKE
               </button>
+              <button 
+                onClick={() => onStartSpellingBee(word)}
+                className="bg-amber-500 text-white px-8 py-4 rounded-[1.5rem] font-black text-xl shadow-lg hover:bg-amber-600 hover:scale-105 transition-all flex items-center justify-center gap-3"
+              >
+                <span>🐝</span> SPELLING BEE
+              </button>
             </div>
           </div>
         );
@@ -263,11 +272,11 @@ const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQ
   };
 
   return (
-    <div className="fixed inset-0 bg-indigo-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-4">
-      <div className="bg-white rounded-[3rem] max-w-3xl w-full h-[600px] shadow-2xl overflow-hidden flex flex-col relative border-8 border-white">
+    <div className="fixed inset-0 bg-indigo-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+      <div className="bg-white rounded-[3rem] max-w-3xl w-full min-h-0 max-h-[90dvh] shadow-2xl overflow-hidden flex flex-col relative border-8 border-white my-auto">
         
         {/* Progress bar */}
-        <div className="absolute top-0 left-0 right-0 h-2 bg-gray-100 flex">
+        <div className="absolute top-0 left-0 right-0 h-2 bg-gray-100 flex shrink-0">
           {steps.map((_, i) => (
             <div 
               key={i} 
@@ -277,7 +286,10 @@ const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQ
         </div>
 
         <button 
-          onClick={onClose}
+          onClick={() => {
+            onWordViewed?.(word);
+            onClose();
+          }}
           className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 transition-colors z-20"
         >
           <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -285,11 +297,11 @@ const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQ
           </svg>
         </button>
 
-        <div className="flex-grow p-8 md:p-12 overflow-hidden relative">
+        <div className="flex-grow min-h-0 p-8 md:p-12 overflow-y-auto relative">
            {renderContent()}
         </div>
 
-        <div className="p-8 bg-gray-50 flex justify-between items-center border-t border-gray-100">
+        <div className="p-8 bg-gray-50 flex justify-between items-center border-t border-gray-100 shrink-0">
           <button 
             onClick={handlePrev}
             disabled={currentStepIndex === 0}

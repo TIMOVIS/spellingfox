@@ -4,7 +4,7 @@ import SpellingModal from './SpellingModal';
 import SpellingBeeModal from './SpellingBeeModal';
 import FlashcardQuest from './FlashcardQuest';
 import QuizModal from './QuizModal';
-import { getStudentPracticeHistoryByDate } from '../lib/supabaseQueries';
+import { getStudentPracticeHistoryByDate, getTodayLondonDate } from '../lib/supabaseQueries';
 import type { PracticeActivityType } from '../lib/supabaseQueries';
 
 interface StudentDashboardProps {
@@ -12,10 +12,10 @@ interface StudentDashboardProps {
   name: string;
   wordBank: WordEntry[];
   dailyWordIds: string[];
-  onCompleteExercise: (points: number, options?: { wordResults: import('../lib/supabaseQueries').WordPracticeResult[]; activityType: PracticeActivityType }) => void;
+  onCompleteExercise: (points: number, options?: { wordResults: import('../lib/supabaseQueries').WordPracticeResult[]; activityType: PracticeActivityType }) => void | Promise<void>;
 }
 
-type PracticeDay = { date: string; records: { word: string; activity_type: string; correct: boolean }[] };
+type PracticeDay = { date: string; records: { word_id: string; word: string; activity_type: string; correct: boolean }[] };
 
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wordBank, dailyWordIds, onCompleteExercise }) => {
   const [viewMode, setViewMode] = useState<'hub' | 'wordList' | 'extraWords'>('hub');
@@ -28,6 +28,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
   const [showPracticeHistory, setShowPracticeHistory] = useState(false);
   /** Words to use in Spelling modal (daily quest or single word from flashcard/extra). */
   const [wordsForSpelling, setWordsForSpelling] = useState<WordEntry[]>([]);
+  /** When set, Spelling Bee uses these words (e.g. single word from flashcard); otherwise dailyWords. */
+  const [spellingBeeWordEntries, setSpellingBeeWordEntries] = useState<WordEntry[] | null>(null);
   /** Filters on "Learn more words" page */
   const [extraYearFilter, setExtraYearFilter] = useState<string>('all');
   const [extraPatternFilter, setExtraPatternFilter] = useState<string>('all');
@@ -119,8 +121,17 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
     setExtraWordsPage(1);
   }, [extraYearFilter, extraPatternFilter, extraSearch]);
 
-  // Mock progress based on current session points for visual feedback
-  const progressPercent = Math.min(100, (dailyWords.length > 0 ? 60 : 0)); 
+  // Daily progress = fraction of to-dos completed today (Daily Quest, Spelling Snake, Spelling Bee)
+  const todayDate = getTodayLondonDate();
+  const todayRecords = useMemo(
+    () => practiceHistory.find(d => d.date === todayDate)?.records ?? [],
+    [practiceHistory, todayDate]
+  );
+  const dailyQuestDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid));
+  const spellingSnakeDone = todayRecords.some(r => r.activity_type === 'spelling_snake');
+  const spellingBeeDone = todayRecords.some(r => r.activity_type === 'spelling_bee');
+  const completedCount = [dailyQuestDone, spellingSnakeDone, spellingBeeDone].filter(Boolean).length;
+  const progressPercent = dailyWords.length === 0 ? 0 : Math.round((completedCount / 3) * 100); 
 
   const handleStartSpellingOnly = () => {
     if (dailyWords.length > 0) {
@@ -166,17 +177,34 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
           </div>
 
           <div className="p-10 space-y-8 bg-white">
-            {/* Progress Section */}
+            {/* Progress Section — linked to the 3 to-dos; details in My practice */}
             <div className="space-y-3">
               <div className="flex justify-between items-end">
                 <span className="text-sm font-black text-gray-400 uppercase tracking-widest">Daily Progress</span>
-                <span className="text-sm font-black text-orange-600">60% Complete</span>
+                <button
+                  type="button"
+                  onClick={() => setShowPracticeHistory(true)}
+                  className="text-sm font-black text-orange-600 hover:text-orange-700 underline underline-offset-2"
+                >
+                  {progressPercent}% Complete · My practice
+                </button>
               </div>
               <div className="h-4 bg-gray-100 rounded-full overflow-hidden p-1 border border-gray-100">
                 <div 
                   className="h-full bg-gradient-to-r from-orange-400 to-amber-400 rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(251,146,60,0.4)]"
                   style={{ width: `${progressPercent}%` }}
                 />
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs font-bold">
+                <span className={dailyQuestDone ? 'text-emerald-600' : 'text-gray-400'}>
+                  {dailyQuestDone ? '✓' : '○'} Daily Quest
+                </span>
+                <span className={spellingSnakeDone ? 'text-emerald-600' : 'text-gray-400'}>
+                  {spellingSnakeDone ? '✓' : '○'} Snake
+                </span>
+                <span className={spellingBeeDone ? 'text-emerald-600' : 'text-gray-400'}>
+                  {spellingBeeDone ? '✓' : '○'} Bee
+                </span>
               </div>
             </div>
 
@@ -424,7 +452,10 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
           wordEntries={wordsForSpelling.length > 0 ? wordsForSpelling : dailyWords}
           onClose={() => setShowSpelling(false)}
           onFinish={(pts, wordResults) => {
-            onCompleteExercise(pts, wordResults?.length ? { wordResults, activityType: 'spelling_snake' } : undefined);
+            const opts = wordResults?.length ? { wordResults, activityType: 'spelling_snake' as const } : undefined;
+            Promise.resolve(onCompleteExercise(pts, opts)).then(() => {
+              if (studentId) getStudentPracticeHistoryByDate(studentId, 30).then(setPracticeHistory).catch(() => {});
+            });
             setShowSpelling(false);
           }}
         />
@@ -432,21 +463,41 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
 
       {showSpellingBee && (
         <SpellingBeeModal 
-          wordEntries={dailyWords}
-          onClose={() => setShowSpellingBee(false)}
-          onFinish={(pts, wordResults) => {
-            onCompleteExercise(pts, wordResults?.length ? { wordResults, activityType: 'spelling_bee' } : undefined);
+          wordEntries={spellingBeeWordEntries ?? dailyWords}
+          onClose={() => {
             setShowSpellingBee(false);
+            setSpellingBeeWordEntries(null);
+          }}
+          onFinish={(pts, wordResults) => {
+            const opts = wordResults?.length ? { wordResults, activityType: 'spelling_bee' as const } : undefined;
+            Promise.resolve(onCompleteExercise(pts, opts)).then(() => {
+              if (studentId) getStudentPracticeHistoryByDate(studentId, 30).then(setPracticeHistory).catch(() => {});
+            });
+            setShowSpellingBee(false);
+            setSpellingBeeWordEntries(null);
           }}
         />
       )}
 
       {activeFlashcard && (
-        <FlashcardQuest 
+        <FlashcardQuest
           word={activeFlashcard}
           onClose={() => setActiveFlashcard(null)}
           onStartQuiz={handleQuizFromFlashcard}
           onStartSpelling={handleSpellingFromFlashcard}
+          onStartSpellingBee={(word) => {
+            setSpellingBeeWordEntries([word]);
+            setActiveFlashcard(null);
+            setShowSpellingBee(true);
+          }}
+          onWordViewed={(word) => {
+            onCompleteExercise(0, {
+              wordResults: [{ wordId: word.id, word: word.word, correct: true }],
+              activityType: 'flashcard'
+            }).then(() => {
+              if (studentId) getStudentPracticeHistoryByDate(studentId, 30).then(setPracticeHistory).catch(() => {});
+            });
+          }}
         />
       )}
 
@@ -476,24 +527,43 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
                 <p className="text-gray-500 font-bold text-center py-8">No practice recorded yet. Complete Spelling Snake or Spelling Bee to see your history here.</p>
               ) : (
                 <ul className="space-y-6">
-                  {practiceHistory.map(({ date, records }) => (
-                    <li key={date}>
-                      <div className="text-sm font-black text-amber-600 uppercase tracking-widest mb-2">
-                        {new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
-                      </div>
-                      <ul className="space-y-1.5">
-                        {records.map((r, i) => (
-                          <li key={`${date}-${i}`} className="flex items-center gap-2 text-gray-900">
-                            <span className={r.correct ? 'text-emerald-500' : 'text-red-500'}>{r.correct ? '✓' : '✗'}</span>
-                            <span className="font-bold">{r.word}</span>
-                            <span className="text-xs text-gray-400">
-                              {r.activity_type === 'spelling_snake' ? 'Snake' : r.activity_type === 'spelling_bee' ? 'Bee' : r.activity_type}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </li>
-                  ))}
+                  {practiceHistory.map(({ date, records }) => {
+                    // Group records by word so we show each word once with its activities
+                    const byWord = new Map<string, { word: string; attempts: { activity_type: string; correct: boolean }[] }>();
+                    for (const r of records) {
+                      const key = r.word_id;
+                      if (!byWord.has(key)) byWord.set(key, { word: r.word, attempts: [] });
+                      byWord.get(key)!.attempts.push({ activity_type: r.activity_type, correct: r.correct });
+                    }
+                    const words = Array.from(byWord.entries());
+                    return (
+                      <li key={date}>
+                        <div className="text-sm font-black text-amber-600 uppercase tracking-widest mb-3">
+                          {new Date(date + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                        </div>
+                        <ul className="space-y-3">
+                          {words.map(([wordId, { word, attempts }]) => (
+                            <li key={wordId} className="bg-amber-50 rounded-xl p-3 border border-amber-100">
+                              <div className="font-bold text-amber-950 mb-1.5">{word}</div>
+                              <div className="flex flex-wrap gap-2">
+                                {attempts.map((a, i) => (
+                                  <span
+                                    key={`${wordId}-${i}`}
+                                    className={`text-xs font-bold px-2 py-0.5 rounded-lg ${
+                                      a.correct ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
+                                    }`}
+                                  >
+                                    {a.activity_type === 'spelling_snake' ? 'Snake' : a.activity_type === 'spelling_bee' ? 'Bee' : a.activity_type === 'flashcard' ? 'Flashcard' : a.activity_type}{' '}
+                                    {a.correct ? '✓' : '✗'}
+                                  </span>
+                                ))}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

@@ -298,8 +298,8 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
   }
 
   return (
-    <div className={`fixed inset-0 bg-amber-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-2 sm:p-4 h-dvh max-h-dvh overflow-hidden transition-transform ${isShaking ? 'animate-bounce' : ''}`}>
-      <div className={`bg-white rounded-2xl sm:rounded-[2.5rem] max-w-2xl w-full shadow-2xl overflow-hidden border-4 sm:border-8 border-amber-400 animate-in zoom-in-95 duration-300 flex flex-col max-h-[calc(100dvh-1rem)] ${isShaking ? 'border-red-500' : ''}`}>
+    <div className={`fixed inset-0 bg-amber-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-2 sm:p-4 min-h-dvh overflow-y-auto transition-transform ${isShaking ? 'animate-bounce' : ''}`}>
+      <div className={`bg-white rounded-2xl sm:rounded-[2.5rem] max-w-2xl w-full shadow-2xl overflow-hidden border-4 sm:border-8 border-amber-400 animate-in zoom-in-95 duration-300 flex flex-col min-h-0 max-h-[calc(100dvh-1rem)] my-auto ${isShaking ? 'border-red-500' : ''}`}>
         
         <div className={`px-4 sm:px-8 py-2 sm:py-4 flex justify-between items-center transition-colors shrink-0 ${isShaking ? 'bg-red-500 text-white' : 'bg-amber-400 text-amber-950'}`}>
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
@@ -316,7 +316,7 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
           </div>
         </div>
 
-        <div className="p-3 sm:p-6 bg-amber-50 flex-1 min-h-0 flex flex-col overflow-hidden">
+        <div className="p-3 sm:p-6 bg-amber-50 flex-1 min-h-0 flex flex-col overflow-y-auto">
           <div className="flex justify-between items-center mb-2 sm:mb-4 bg-white p-2 sm:p-4 rounded-2xl sm:rounded-3xl border-2 border-amber-200 shadow-sm shrink-0">
              <div className="flex flex-col min-w-0 flex-1">
                 <span className="text-[9px] sm:text-[10px] font-black text-amber-600 uppercase tracking-widest">Collect Letters In Order</span>
