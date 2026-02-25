@@ -7,7 +7,7 @@ import type { WordPracticeResult } from '../lib/supabaseQueries';
 interface SpellingModalProps {
   wordEntries: WordEntry[];
   onClose: () => void;
-  onFinish: (points: number, wordResults?: WordPracticeResult[]) => void;
+  onFinish: (points: number, wordResults?: WordPracticeResult[]) => void | Promise<void>;
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -107,7 +107,7 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
     if (currentWord) resetLevel();
   }, [advanceCounter, resetLevel]);
 
-  const advanceToNextWord = useCallback(() => {
+  const advanceToNextWord = useCallback(async () => {
     if (!currentWord) return;
     const result: WordPracticeResult = {
       wordId: currentWord.id,
@@ -115,20 +115,24 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
       correct: !hadMistakeOnCurrentWord
     };
     const nextResults = [...wordResults, result];
-    setWordResults(nextResults);
     const nextQueue = hadMistakeOnCurrentWord ? [...queue.slice(1), queue[0]] : queue.slice(1);
+
+    if (nextQueue.length === 0) {
+      await Promise.resolve(onFinish(score, nextResults));
+      return;
+    }
+
+    setWordResults(nextResults);
     setQueue(nextQueue);
     setHadMistakeOnCurrentWord(false);
     setFeedback(null);
     setAdvanceCounter(c => c + 1);
-    if (nextQueue.length === 0) {
-      onFinish(score, nextResults);
-    } else {
-      setGameState('starting');
-    }
+    setGameState('starting');
   }, [currentWord, hadMistakeOnCurrentWord, wordResults, queue, score, onFinish]);
 
-  // After showing wrong letter: wobble/red, then reset sequence and speak word again (retry same word)
+  // After showing wrong letter: wobble/red, then reset sequence and speak word again (retry same word).
+  // We do NOT clear hadMistakeOnCurrentWord here, so the word is still recorded as incorrect in My practice
+  // even if the student completes it correctly after the retry.
   useEffect(() => {
     if (wrongLetter === null) return;
     const t = setTimeout(() => {

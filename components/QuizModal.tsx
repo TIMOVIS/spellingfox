@@ -12,7 +12,7 @@ interface Question {
 interface QuizModalProps {
   words: string[];
   onClose: () => void;
-  onFinish: (points: number) => void;
+  onFinish: (points: number, hadMistake?: boolean) => void;
 }
 
 interface Bubble {
@@ -30,9 +30,11 @@ const QuizModal: React.FC<QuizModalProps> = ({ words, onClose, onFinish }) => {
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [score, setScore] = useState(0);
+  const [hadMistake, setHadMistake] = useState(false);
   const [feedback, setFeedback] = useState<{ correct: boolean, text: string } | null>(null);
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const requestRef = useRef<number>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   useEffect(() => {
     const fetchQuiz = async () => {
@@ -46,7 +48,7 @@ const QuizModal: React.FC<QuizModalProps> = ({ words, onClose, onFinish }) => {
       }
     };
     fetchQuiz();
-  }, [words]);
+  }, [words, retryCount]);
 
   useEffect(() => {
     if (!loading && questions.length > 0 && !feedback) {
@@ -88,6 +90,7 @@ const QuizModal: React.FC<QuizModalProps> = ({ words, onClose, onFinish }) => {
     if (feedback) return;
     const isCorrect = bubble.text === questions[currentIndex].answer;
     if (isCorrect) setScore(s => s + 100);
+    if (!isCorrect) setHadMistake(true);
     setFeedback({
       correct: isCorrect,
       text: questions[currentIndex].explanation
@@ -98,9 +101,22 @@ const QuizModal: React.FC<QuizModalProps> = ({ words, onClose, onFinish }) => {
     setFeedback(null);
     if (currentIndex + 1 < questions.length) {
       setCurrentIndex(currentIndex + 1);
-    } else {
-      onFinish(score);
     }
+  };
+
+  const handleExitQuiz = () => {
+    onFinish(score, hadMistake);
+    onClose();
+  };
+
+  const handleRepeatQuiz = () => {
+    setQuestions([]);
+    setLoading(true);
+    setCurrentIndex(0);
+    setScore(0);
+    setHadMistake(false);
+    setFeedback(null);
+    setRetryCount(c => c + 1);
   };
 
   if (loading) {
@@ -169,12 +185,29 @@ const QuizModal: React.FC<QuizModalProps> = ({ words, onClose, onFinish }) => {
                 <p className="text-gray-600 text-lg mb-8 font-medium italic">
                   {feedback.text}
                 </p>
-                <button 
-                  onClick={nextQuestion}
-                  className="w-full bg-indigo-600 text-white py-5 rounded-[2rem] font-black text-2xl shadow-xl hover:bg-indigo-700 transition-all hover:scale-105 active:scale-95"
-                >
-                  {currentIndex + 1 === questions.length ? 'CLAIM REWARDS 🍯' : 'NEXT TARGET 🎯'}
-                </button>
+                {currentIndex + 1 === questions.length ? (
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <button
+                      onClick={handleRepeatQuiz}
+                      className="flex-1 bg-indigo-600 text-white py-4 px-6 rounded-2xl font-black text-lg shadow-xl hover:bg-indigo-700 transition-all hover:scale-105 active:scale-95"
+                    >
+                      Repeat quiz
+                    </button>
+                    <button
+                      onClick={handleExitQuiz}
+                      className="flex-1 bg-gray-100 text-gray-800 py-4 px-6 rounded-2xl font-black text-lg border-2 border-gray-200 hover:bg-gray-200 transition-all active:scale-95"
+                    >
+                      Exit quiz
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={nextQuestion}
+                    className="w-full bg-indigo-600 text-white py-5 rounded-[2rem] font-black text-2xl shadow-xl hover:bg-indigo-700 transition-all hover:scale-105 active:scale-95"
+                  >
+                    NEXT TARGET 🎯
+                  </button>
+                )}
               </div>
             </div>
           )}

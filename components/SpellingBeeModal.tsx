@@ -133,6 +133,11 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
     handleSpeakWord();
   };
 
+  const handleClose = () => {
+    onFinish(score, wordResults);
+    onClose();
+  };
+
   if (!currentWord) {
     return (
       <div className="fixed inset-0 bg-amber-900/60 backdrop-blur-sm z-[100] flex items-center justify-center">
@@ -152,7 +157,7 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
           </div>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             <span className="font-bold bg-white/30 px-2 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs">Words left: {queue.length}</span>
-            <button onClick={onClose} className="hover:rotate-90 transition-transform p-1">
+            <button onClick={handleClose} className="hover:rotate-90 transition-transform p-1">
               <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" />
               </svg>

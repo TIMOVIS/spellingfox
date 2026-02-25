@@ -534,9 +534,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
             setShowQuiz(false);
             setQuizWordEntries(null);
           }}
-          onFinish={async (pts) => {
+          onFinish={async (pts, hadMistake = false) => {
             const opts = quizWordEntries?.length
-              ? { wordResults: quizWordEntries.map(w => ({ wordId: w.id, word: w.word, correct: true })), activityType: 'quiz' as const }
+              ? { wordResults: quizWordEntries.map(w => ({ wordId: w.id, word: w.word, correct: !hadMistake })), activityType: 'quiz' as const }
               : undefined;
             try {
               await Promise.resolve(onCompleteExercise(pts, opts));
