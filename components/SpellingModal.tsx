@@ -19,6 +19,39 @@ function shuffle<T>(arr: T[]): T[] {
   return out;
 }
 
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+/** Letters often confused (visually or phonetically) for spelling practice. */
+const CONFUSIONS: Record<string, string[]> = {
+  A: ['E', 'O', 'U', 'H'], B: ['D', 'P', 'R', 'H'], C: ['K', 'S', 'G', 'O'], D: ['B', 'P', 'Q', 'T'],
+  E: ['A', 'I', 'U'],       F: ['P', 'T', 'H'],     G: ['C', 'J', 'Q'],     H: ['N', 'M', 'A', 'R'],
+  I: ['E', 'L', 'J', 'Y'], J: ['I', 'G', 'Y'],     K: ['C', 'X', 'R'],     L: ['I', 'T', 'E'],
+  M: ['N', 'W', 'H'],      N: ['M', 'H', 'U', 'R'], O: ['A', 'Q', 'D', 'C'], P: ['B', 'D', 'R', 'Q'],
+  Q: ['O', 'G', 'P', 'D'], R: ['P', 'B', 'K', 'N'], S: ['C', 'Z', 'F'],    T: ['F', 'D', 'L', 'I'],
+  U: ['V', 'O', 'N', 'A'], V: ['U', 'W', 'Y'],     W: ['M', 'V', 'N'],    X: ['K', 'S', 'Z'],
+  Y: ['I', 'V', 'U', 'J'], Z: ['S', 'X', 'N'],
+};
+
+const OPTIONS_PER_SLOT = 5; // 1 correct + 4 distractors
+
+/** Return an array of letter options for a slot: correct letter + confusing/random distractors, shuffled. */
+function getOptionsForSlot(targetLetters: string[], slotIndex: number): string[] {
+  const correct = targetLetters[slotIndex];
+  const used = new Set<string>([correct]);
+  const distractors: string[] = [];
+  const confusing = CONFUSIONS[correct];
+  if (confusing) {
+    for (const c of shuffle(confusing)) {
+      if (!used.has(c)) { used.add(c); distractors.push(c); }
+      if (distractors.length >= OPTIONS_PER_SLOT - 1) break;
+    }
+  }
+  while (distractors.length < OPTIONS_PER_SLOT - 1) {
+    const r = ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+    if (!used.has(r)) { used.add(r); distractors.push(r); }
+  }
+  return shuffle([correct, ...distractors]);
+}
+
 /** Play a short success "snap" sound (optional, no-op if audio fails). */
 function playSuccessSound() {
   try {
@@ -48,8 +81,8 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
 
   /** For current word: letters placed in slot order; correct: false means show red and re-queue word. */
   const [placedLetters, setPlacedLetters] = useState<Array<{ letter: string; correct: boolean }>>([]);
-  /** Scrambled letter tiles (one per letter of the word). Tapping removes on correct. */
-  const [tiles, setTiles] = useState<Array<{ id: string; letter: string }>>([]);
+  /** Options for the current slot only: correct letter + distractors, shuffled. */
+  const [currentSlotOptions, setCurrentSlotOptions] = useState<string[]>([]);
   const [wordResults, setWordResults] = useState<WordPracticeResult[]>([]);
 
   const currentWord = queue[0];
@@ -65,7 +98,7 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
     if (!currentWord) return;
     const letters = currentWord.word.toUpperCase().split('');
     setPlacedLetters([]);
-    setTiles(shuffle(letters).map((letter, i) => ({ id: `tile-${i}-${letter}-${Math.random().toString(36).slice(2)}`, letter })));
+    setCurrentSlotOptions(getOptionsForSlot(letters, 0));
     setHadMistakeOnCurrentWord(false);
     setGameState('preview');
   }, [currentWord]);
@@ -102,8 +135,8 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
     return () => clearTimeout(t);
   }, [showWrongAndAdvance, advanceToNextWord]);
 
-  const handleTileTap = useCallback(
-    (tileId: string, letter: string) => {
+  const handleOptionTap = useCallback(
+    (letter: string) => {
       if (gameState !== 'playing' || currentSlotIndex >= targetLetters.length || showWrongAndAdvance) return;
       const expected = targetLetters[currentSlotIndex];
       const correct = letter === expected;
@@ -111,12 +144,13 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
       if (correct) {
         playSuccessSound();
         setPlacedLetters(prev => [...prev, { letter, correct: true }]);
-        setTiles(prev => prev.filter(t => t.id !== tileId));
         setScore(s => s + 10);
         if (currentSlotIndex + 1 >= targetLetters.length) {
           setScore(s => s + 200);
           setGameState('feedback');
           setFeedback({ correct: true, word: currentWord!.word });
+        } else {
+          setCurrentSlotOptions(getOptionsForSlot(targetLetters, currentSlotIndex + 1));
         }
       } else {
         setPlacedLetters(prev => [...prev, { letter, correct: false }]);
@@ -231,14 +265,16 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
 
             {gameState === 'playing' && (
               <div className="flex-1 flex flex-col">
-                <p className="text-xs font-black text-amber-600 uppercase tracking-widest mb-2">Tap the correct letter for each slot</p>
-                <div className="flex-1 flex flex-wrap gap-3 content-start justify-center items-center">
-                  {tiles.map(({ id, letter }) => (
+                <p className="text-xs font-black text-amber-600 uppercase tracking-widest mb-3">
+                  Tap the correct letter for slot {currentSlotIndex + 1} of {targetLetters.length}
+                </p>
+                <div className="flex-1 flex flex-wrap gap-3 content-center justify-center items-center">
+                  {currentSlotOptions.map((letter) => (
                     <button
-                      key={id}
+                      key={`${currentSlotIndex}-${letter}`}
                       type="button"
-                      onClick={() => handleTileTap(id, letter)}
-                      className="w-14 h-14 sm:w-20 sm:h-20 rounded-2xl bg-white border-4 border-amber-300 text-2xl sm:text-4xl font-black text-amber-900 shadow-lg hover:scale-105 active:scale-95 hover:border-amber-500 hover:bg-amber-50 transition-all"
+                      onClick={() => handleOptionTap(letter)}
+                      className="w-16 h-16 sm:w-24 sm:h-24 rounded-2xl bg-white border-4 border-amber-300 text-3xl sm:text-5xl font-black text-amber-900 shadow-lg hover:scale-105 active:scale-95 hover:border-amber-500 hover:bg-amber-50 transition-all"
                     >
                       {letter}
                     </button>
