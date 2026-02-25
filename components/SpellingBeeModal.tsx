@@ -22,6 +22,8 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
   /** Each slot: the letter the student typed and whether it was correct (green) or wrong (red). */
   const [typedLetters, setTypedLetters] = useState<Array<{ letter: string; correct: boolean }>>([]);
   const [isShaking, setIsShaking] = useState(false);
+  /** When set, show this wrong letter with wobble/red, then reset and speak word again. */
+  const [wrongLetter, setWrongLetter] = useState<string | null>(null);
   /** Accumulated results for each completed word (for practice history). */
   const [wordResults, setWordResults] = useState<WordPracticeResult[]>([]);
 
@@ -38,7 +40,7 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement> | KeyboardEvent) => {
-      if (gameState !== 'typing' || !currentWord) return;
+      if (gameState !== 'typing' || !currentWord || wrongLetter !== null) return;
       if (typedLetters.length >= targetLetters.length) return;
 
       const key = e.key?.toUpperCase();
@@ -49,25 +51,35 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
       const expected = targetLetters[typedLetters.length];
       const correct = key === expected;
 
-      setTypedLetters(prev => {
-        const next = [...prev, { letter: key, correct }];
-        if (next.length === targetLetters.length) {
-          setGameState('feedback');
-          if (next.every(t => t.correct)) setScore(s => s + 200);
-        }
-        return next;
-      });
       if (correct) {
+        setTypedLetters(prev => {
+          const next = [...prev, { letter: key, correct: true }];
+          if (next.length === targetLetters.length) {
+            setGameState('feedback');
+            setScore(s => s + 200);
+          }
+          return next;
+        });
         setScore(s => s + 10);
       } else {
         setHadMistakeOnCurrentWord(true);
-        setIsShaking(true);
         setScore(s => Math.max(0, s - 10));
-        setTimeout(() => setIsShaking(false), 500);
+        setWrongLetter(key);
       }
     },
-    [gameState, currentWord, targetLetters, typedLetters.length]
+    [gameState, currentWord, targetLetters, typedLetters.length, wrongLetter]
   );
+
+  // After showing wrong letter: wobble/red, then speak word again and reset typed sequence
+  useEffect(() => {
+    if (wrongLetter === null) return;
+    const t = setTimeout(() => {
+      setWrongLetter(null);
+      setTypedLetters([]);
+      handleSpeakWord();
+    }, 1400);
+    return () => clearTimeout(t);
+  }, [wrongLetter, handleSpeakWord]);
 
   const resetLevel = useCallback(() => {
     if (!currentWord) return;
@@ -153,16 +165,25 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
             <div className="flex flex-col min-w-0 flex-1">
               <span className="text-[9px] sm:text-[10px] font-black text-amber-600 uppercase tracking-widest">What you typed — green = correct, red = wrong</span>
               <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto flex-wrap">
-                {targetLetters.map((_, i) => (
-                  <span
-                    key={i}
-                    className={`text-xl sm:text-3xl font-black tracking-widest font-mono px-1 ${
-                      i >= typedLetters.length ? 'text-gray-300' : typedLetters[i].correct ? 'text-emerald-600' : 'text-red-600'
-                    }`}
-                  >
-                    {i < typedLetters.length ? typedLetters[i].letter : ' _ '}
-                  </span>
-                ))}
+                {targetLetters.map((_, i) => {
+                  const showWrong = wrongLetter !== null && i === typedLetters.length;
+                  return (
+                    <span
+                      key={i}
+                      className={`text-xl sm:text-3xl font-black tracking-widest font-mono px-1 ${
+                        showWrong
+                          ? 'text-red-600 animate-bee-wobble-bounce'
+                          : i >= typedLetters.length
+                            ? 'text-gray-300'
+                            : typedLetters[i].correct
+                              ? 'text-emerald-600'
+                              : 'text-red-600'
+                      }`}
+                    >
+                      {showWrong ? wrongLetter : i < typedLetters.length ? typedLetters[i].letter : ' _ '}
+                    </span>
+                  );
+                })}
               </div>
             </div>
             <div className="text-right shrink-0 ml-2">
@@ -280,6 +301,19 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
           80% { transform: translate(-1px, -1px) rotate(1deg); }
           90% { transform: translate(1px, 2px) rotate(0deg); }
           100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+        @keyframes bee-wobble-bounce {
+          0% { transform: scale(1); }
+          15% { transform: scale(1.15) rotate(-4deg); }
+          30% { transform: scale(1.15) rotate(4deg); }
+          45% { transform: scale(1.15) rotate(-3deg); }
+          60% { transform: scale(1.15) rotate(3deg); }
+          75% { transform: scale(1.1) rotate(0deg); }
+          90% { transform: scale(1.2); opacity: 0.6; }
+          100% { transform: scale(0.6); opacity: 0; }
+        }
+        .animate-bee-wobble-bounce {
+          animation: bee-wobble-bounce 1.35s ease-in-out forwards;
         }
       `}</style>
     </div>

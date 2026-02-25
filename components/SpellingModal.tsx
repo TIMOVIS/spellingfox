@@ -91,8 +91,8 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
     [currentWord]
   );
   const currentSlotIndex = placedLetters.length;
-  const wordComplete = targetLetters.length > 0 && placedLetters.length >= targetLetters.length;
-  const showWrongAndAdvance = placedLetters.length > 0 && placedLetters[placedLetters.length - 1]?.correct === false;
+  /** When set, show this wrong letter in the current slot with wobble/red, then reset and speak word again. */
+  const [wrongLetter, setWrongLetter] = useState<string | null>(null);
 
   const resetLevel = useCallback(() => {
     if (!currentWord) return;
@@ -128,16 +128,21 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
     }
   }, [currentWord, hadMistakeOnCurrentWord, wordResults, queue, score, onFinish]);
 
-  // After showing wrong letter in red, advance to next word
+  // After showing wrong letter: wobble/red, then reset sequence and speak word again (retry same word)
   useEffect(() => {
-    if (!showWrongAndAdvance) return;
-    const t = setTimeout(advanceToNextWord, 1400);
+    if (wrongLetter === null) return;
+    const t = setTimeout(() => {
+      setWrongLetter(null);
+      setPlacedLetters([]);
+      setCurrentSlotOptions(getOptionsForSlot(targetLetters, 0));
+      speakText(`${currentWord!.word}... ${currentWord!.word}`);
+    }, 1400);
     return () => clearTimeout(t);
-  }, [showWrongAndAdvance, advanceToNextWord]);
+  }, [wrongLetter, targetLetters, currentWord]);
 
   const handleOptionTap = useCallback(
     (letter: string) => {
-      if (gameState !== 'playing' || currentSlotIndex >= targetLetters.length || showWrongAndAdvance) return;
+      if (gameState !== 'playing' || currentSlotIndex >= targetLetters.length || wrongLetter !== null) return;
       const expected = targetLetters[currentSlotIndex];
       const correct = letter === expected;
 
@@ -153,12 +158,12 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
           setCurrentSlotOptions(getOptionsForSlot(targetLetters, currentSlotIndex + 1));
         }
       } else {
-        setPlacedLetters(prev => [...prev, { letter, correct: false }]);
         setHadMistakeOnCurrentWord(true);
         setScore(s => Math.max(0, s - 10));
+        setWrongLetter(letter);
       }
     },
-    [gameState, currentSlotIndex, targetLetters, currentWord, showWrongAndAdvance]
+    [gameState, currentSlotIndex, targetLetters, currentWord, wrongLetter]
   );
 
   const handleSpeakWord = useCallback(async () => {
@@ -216,22 +221,29 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
                   </svg>
                 </button>
                 <div className="flex flex-wrap gap-1 sm:gap-2 items-center">
-                  {targetLetters.map((_, i) => (
-                    <span
-                      key={i}
-                      className={`
-                        inline-flex items-center justify-center min-w-[2rem] sm:min-w-[2.75rem] h-10 sm:h-12 text-xl sm:text-2xl font-black rounded-xl border-2 transition-all duration-200
-                        ${i < placedLetters.length
-                          ? placedLetters[i].correct
-                            ? 'bg-emerald-100 border-emerald-400 text-emerald-800 scale-100'
-                            : 'bg-red-100 border-red-400 text-red-600 animate-[shake_0.4s_ease-in-out]'
-                          : 'bg-amber-50 border-amber-200 text-gray-300'
-                        }
-                      `}
-                    >
-                      {i < placedLetters.length ? placedLetters[i].letter : '?'}
-                    </span>
-                  ))}
+                  {targetLetters.map((_, i) => {
+                    const showWrong = wrongLetter !== null && i === placedLetters.length;
+                    const isEmpty = i >= placedLetters.length && !showWrong;
+                    const isCorrect = i < placedLetters.length && placedLetters[i].correct;
+                    return (
+                      <span
+                        key={i}
+                        className={`
+                          inline-flex items-center justify-center min-w-[2rem] sm:min-w-[2.75rem] h-10 sm:h-12 text-xl sm:text-2xl font-black rounded-xl border-2 transition-all duration-200
+                          ${showWrong
+                            ? 'bg-red-200 border-red-500 text-red-700 animate-wobble-then-bounce'
+                            : isCorrect
+                              ? 'bg-emerald-100 border-emerald-400 text-emerald-800 scale-100'
+                              : isEmpty
+                                ? 'bg-amber-50 border-amber-200 text-gray-300'
+                                : 'bg-red-100 border-red-400 text-red-600'
+                          }
+                        `}
+                      >
+                        {showWrong ? wrongLetter : i < placedLetters.length ? placedLetters[i].letter : '?'}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -306,6 +318,19 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
           40% { transform: translateX(6px); }
           60% { transform: translateX(-4px); }
           80% { transform: translateX(4px); }
+        }
+        @keyframes wobble-then-bounce {
+          0% { transform: scale(1); }
+          15% { transform: scale(1.1) rotate(-3deg); }
+          30% { transform: scale(1.1) rotate(3deg); }
+          45% { transform: scale(1.1) rotate(-2deg); }
+          60% { transform: scale(1.1) rotate(2deg); }
+          75% { transform: scale(1.05) rotate(0deg); }
+          90% { transform: scale(1.2); opacity: 0.8; }
+          100% { transform: scale(0.5); opacity: 0; }
+        }
+        .animate-wobble-then-bounce {
+          animation: wobble-then-bounce 1.35s ease-in-out forwards;
         }
       `}</style>
     </div>

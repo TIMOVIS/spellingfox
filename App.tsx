@@ -480,15 +480,18 @@ const App: React.FC = () => {
               dailyWordIds={state.dailyWordIds}
               onCompleteExercise={async (pts, options?: { wordResults: WordPracticeResult[]; activityType: PracticeActivityType }) => {
                 setState(prev => ({ ...prev, points: prev.points + pts }));
-                if (currentStudentId) {
+                if (!currentStudentId) return;
+                if (options?.wordResults?.length) {
                   try {
-                    await addPointsToStudent(currentStudentId, pts);
-                    if (options?.wordResults?.length) {
-                      await savePracticeRecords(currentStudentId, options.activityType, options.wordResults);
-                    }
-                  } catch (error) {
-                    console.error('Failed to save to Supabase:', error);
+                    await savePracticeRecords(currentStudentId, options.activityType, options.wordResults);
+                  } catch (e) {
+                    console.error('Failed to save practice records:', e);
                   }
+                }
+                try {
+                  await addPointsToStudent(currentStudentId, pts);
+                } catch (e) {
+                  console.error('Failed to save points:', e);
                 }
               }}
             />
