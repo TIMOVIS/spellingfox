@@ -121,17 +121,28 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
     setExtraWordsPage(1);
   }, [extraYearFilter, extraPatternFilter, extraSearch]);
 
-  // Daily progress = fraction of to-dos completed today (Daily Quest, Spelling Snake, Spelling Bee)
+  // Daily progress = (word × to-do) slots: each word has 3 slots (Daily Quest, Snake, Bee); progress = completed slots / total slots
   const todayDate = getTodayLondonDate();
   const todayRecords = useMemo(
     () => practiceHistory.find(d => d.date === todayDate)?.records ?? [],
     [practiceHistory, todayDate]
   );
-  const dailyQuestDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid));
-  const spellingSnakeDone = todayRecords.some(r => r.activity_type === 'spelling_snake');
-  const spellingBeeDone = todayRecords.some(r => r.activity_type === 'spelling_bee');
-  const completedCount = [dailyQuestDone, spellingSnakeDone, spellingBeeDone].filter(Boolean).length;
-  const progressPercent = dailyWords.length === 0 ? 0 : Math.round((completedCount / 3) * 100); 
+  const totalSlots = dailyWordIds.length * 3; // 3 activities per word
+  const completedSlots = useMemo(() => {
+    if (dailyWordIds.length === 0) return 0;
+    let n = 0;
+    for (const wid of dailyWordIds) {
+      if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'flashcard')) n += 1;
+      if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_snake')) n += 1;
+      if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_bee')) n += 1;
+    }
+    return n;
+  }, [dailyWordIds, todayRecords]);
+  const progressPercent = totalSlots === 0 ? 0 : Math.round((completedSlots / totalSlots) * 100);
+  // To-do “fully done” when every daily word has that activity (for checkmarks)
+  const dailyQuestDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'flashcard'));
+  const spellingSnakeDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_snake'));
+  const spellingBeeDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_bee')); 
 
   const handleStartSpellingOnly = () => {
     if (dailyWords.length > 0) {
@@ -229,9 +240,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black">To do 2: Spelling Snake</span>
+                    <span className="block text-3xl font-black">To do 2: Word building</span>
                   </div>
-                  <span className="text-5xl group-hover:rotate-12 transition-transform">🐍</span>
+                  <span className="text-5xl group-hover:rotate-12 transition-transform">🧩</span>
                 </div>
               </button>
 

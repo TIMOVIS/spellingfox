@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { WordEntry, YearGroup } from '../types';
 import { generateWordExplanation, extractVocabularyFromFile, generateDailySpellingList } from '../geminiService';
-import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests, getStudentProgress, getStudentPracticeHistoryByDate } from '../lib/supabaseQueries';
+import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests, getStudentProgress, getStudentPracticeHistoryByDate, assignWordsToDailyQuest, getTodayLondonDate } from '../lib/supabaseQueries';
 import { VocabWord } from '../lib/supabase';
 
 interface TutorDashboardProps {
@@ -61,6 +61,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const [pastQuestDetail, setPastQuestDetail] = useState<Array<{ word: VocabWord; completed?: boolean }>>([]);
   const [loadingPastQuests, setLoadingPastQuests] = useState(false);
   const [pastQuestsOpen, setPastQuestsOpen] = useState(false);
+  const [reassigningPastQuest, setReassigningPastQuest] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [enrichingWordId, setEnrichingWordId] = useState<string | null>(null);
   const [enrichingAll, setEnrichingAll] = useState(false);
@@ -1004,7 +1005,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                   ) : pastQuestDetail.length === 0 ? (
                     <p className="text-gray-500 text-sm">No words for this date.</p>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <p className="text-gray-600 text-sm font-medium">
                         {pastQuestDetail.filter(q => q.completed).length} of {pastQuestDetail.length} completed
                       </p>
@@ -1023,6 +1024,27 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                           </span>
                         ))}
                       </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!studentId || pastQuestDetail.length === 0) return;
+                          const wordIds = pastQuestDetail.map(q => q.word?.id).filter((id): id is string => !!id);
+                          if (wordIds.length === 0) return;
+                          setReassigningPastQuest(true);
+                          try {
+                            await assignWordsToDailyQuest(studentId, wordIds, getTodayLondonDate());
+                            await onRefetchDailyQuest?.();
+                          } catch (e) {
+                            console.error('Failed to reassign past quest:', e);
+                          } finally {
+                            setReassigningPastQuest(false);
+                          }
+                        }}
+                        disabled={reassigningPastQuest}
+                        className="w-full sm:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-black text-sm shadow-sm disabled:opacity-70 disabled:cursor-not-allowed"
+                      >
+                        {reassigningPastQuest ? 'Reassigning…' : 'Reassign this quest to today'}
+                      </button>
                     </div>
                   )
                 )}
