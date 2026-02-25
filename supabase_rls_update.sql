@@ -109,3 +109,15 @@ CREATE POLICY "Quest completions can be updated by anyone"
 CREATE POLICY "Quest completions can be deleted by anyone"
     ON vocab_quest_completions FOR DELETE
     USING (true);
+
+DROP POLICY IF EXISTS "Practice records are viewable by authenticated users" ON vocab_practice_records;
+DROP POLICY IF EXISTS "Practice records can be inserted by authenticated users" ON vocab_practice_records;
+DROP POLICY IF EXISTS "Practice records can be updated by authenticated users" ON vocab_practice_records;
+DROP POLICY IF EXISTS "Practice records anon select" ON vocab_practice_records;
+DROP POLICY IF EXISTS "Practice records anon insert" ON vocab_practice_records;
+CREATE POLICY "Practice records viewable by everyone"
+    ON vocab_practice_records FOR SELECT USING (true);
+CREATE POLICY "Practice records insert by anyone"
+    ON vocab_practice_records FOR INSERT WITH CHECK (true);
+CREATE POLICY "Practice records update by anyone"
+    ON vocab_practice_records FOR UPDATE USING (true);

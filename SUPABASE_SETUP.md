@@ -120,6 +120,17 @@ GROUP BY s.id, s.name, sp.points, sp.streak
 ORDER BY s.name;
 ```
 
+## Troubleshooting
+
+### "My practice" stays empty after Spelling Bee or Word building
+
+The app uses the **anon** key (no login). Practice records must be readable and writable by anon:
+
+1. **Create the table** (if not already): run `supabase_migration_practice_records.sql` in the SQL Editor (it creates `vocab_practice_records` and adds anon policies).
+2. **If the table exists but practice still doesn’t show**: run the "Practice records" block from `supabase_rls_update.sql` in the SQL Editor so anon can SELECT and INSERT on `vocab_practice_records`.
+
+After that, complete a game again and open "My practice"; the list should update.
+
 ## Next Steps
 
 1. Install Supabase client library in your app:

@@ -287,7 +287,7 @@ const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQ
 
         <button 
           onClick={() => {
-            onWordViewed?.(word);
+            if (currentStepIndex >= steps.length - 1) onWordViewed?.(word);
             onClose();
           }}
           className="absolute top-6 right-6 text-gray-400 hover:text-gray-600 transition-colors z-20"

@@ -24,6 +24,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
   const [activeFlashcard, setActiveFlashcard] = useState<WordEntry | null>(null);
   const [showQuiz, setShowQuiz] = useState(false);
   const [quizWords, setQuizWords] = useState<string[]>([]);
+  /** When quiz is opened from flashcard, keep WordEntry(s) so we can save quiz practice to My practice. */
+  const [quizWordEntries, setQuizWordEntries] = useState<WordEntry[] | null>(null);
   const [practiceHistory, setPracticeHistory] = useState<PracticeDay[]>([]);
   const [showPracticeHistory, setShowPracticeHistory] = useState(false);
   /** Words to use in Spelling modal (daily quest or single word from flashcard/extra). */
@@ -157,6 +159,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
 
   const handleQuizFromFlashcard = (word: WordEntry) => {
     setQuizWords([word.word]);
+    setQuizWordEntries([word]);
     setActiveFlashcard(null);
     setShowQuiz(true);
   };
@@ -462,11 +465,17 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
         <SpellingModal 
           wordEntries={wordsForSpelling.length > 0 ? wordsForSpelling : dailyWords}
           onClose={() => setShowSpelling(false)}
-          onFinish={(pts, wordResults) => {
+          onFinish={async (pts, wordResults) => {
             const opts = wordResults?.length ? { wordResults, activityType: 'spelling_snake' as const } : undefined;
-            Promise.resolve(onCompleteExercise(pts, opts)).then(() => {
-              if (studentId) getStudentPracticeHistoryByDate(studentId, 30).then(setPracticeHistory).catch(() => {});
-            });
+            try {
+              await Promise.resolve(onCompleteExercise(pts, opts));
+              if (studentId) {
+                const history = await getStudentPracticeHistoryByDate(studentId, 30);
+                setPracticeHistory(history);
+              }
+            } catch (e) {
+              console.error('Save practice failed:', e);
+            }
             setShowSpelling(false);
           }}
         />
@@ -479,11 +488,17 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
             setShowSpellingBee(false);
             setSpellingBeeWordEntries(null);
           }}
-          onFinish={(pts, wordResults) => {
+          onFinish={async (pts, wordResults) => {
             const opts = wordResults?.length ? { wordResults, activityType: 'spelling_bee' as const } : undefined;
-            Promise.resolve(onCompleteExercise(pts, opts)).then(() => {
-              if (studentId) getStudentPracticeHistoryByDate(studentId, 30).then(setPracticeHistory).catch(() => {});
-            });
+            try {
+              await Promise.resolve(onCompleteExercise(pts, opts));
+              if (studentId) {
+                const history = await getStudentPracticeHistoryByDate(studentId, 30);
+                setPracticeHistory(history);
+              }
+            } catch (e) {
+              console.error('Save practice failed:', e);
+            }
             setShowSpellingBee(false);
             setSpellingBeeWordEntries(null);
           }}
@@ -515,10 +530,25 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
       {showQuiz && (
         <QuizModal 
           words={quizWords}
-          onClose={() => setShowQuiz(false)}
-          onFinish={(pts) => {
-            onCompleteExercise(pts);
+          onClose={() => {
             setShowQuiz(false);
+            setQuizWordEntries(null);
+          }}
+          onFinish={async (pts) => {
+            const opts = quizWordEntries?.length
+              ? { wordResults: quizWordEntries.map(w => ({ wordId: w.id, word: w.word, correct: true })), activityType: 'quiz' as const }
+              : undefined;
+            try {
+              await Promise.resolve(onCompleteExercise(pts, opts));
+              if (studentId) {
+                const history = await getStudentPracticeHistoryByDate(studentId, 30);
+                setPracticeHistory(history);
+              }
+            } catch (e) {
+              console.error('Save practice failed:', e);
+            }
+            setShowQuiz(false);
+            setQuizWordEntries(null);
           }}
         />
       )}
