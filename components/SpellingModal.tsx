@@ -109,6 +109,7 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
 
   const advanceToNextWord = useCallback(async () => {
     if (!currentWord) return;
+    // Mark incorrect in My practice if they ever made a mistake on this word (even if they got it right on retry)
     const result: WordPracticeResult = {
       wordId: currentWord.id,
       word: currentWord.word,
@@ -187,6 +188,11 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
     advanceToNextWord();
   }, [advanceToNextWord]);
 
+  const handleClose = useCallback(() => {
+    onFinish(score, wordResults);
+    onClose();
+  }, [score, wordResults, onFinish, onClose]);
+
   if (!currentWord) {
     return (
       <div className="fixed inset-0 bg-amber-900/60 backdrop-blur-sm z-[100] flex items-center justify-center">
@@ -206,7 +212,7 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
           </div>
           <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             <span className="font-bold bg-white/30 px-2 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs">Words left: {queue.length}</span>
-            <button onClick={onClose} className="hover:rotate-90 transition-transform p-1" aria-label="Close">
+            <button onClick={handleClose} className="hover:rotate-90 transition-transform p-1" aria-label="Close">
               <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12" />
               </svg>
