@@ -27,6 +27,16 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
   /** Accumulated results for each completed word (for practice history). */
   const [wordResults, setWordResults] = useState<WordPracticeResult[]>([]);
 
+  // Multi-word preview before starting typing
+  const WORDS_PER_PAGE = 3;
+  const [hasStarted, setHasStarted] = useState(false);
+  const [previewPage, setPreviewPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(wordEntries.length / WORDS_PER_PAGE));
+  const previewWords = wordEntries.slice(
+    previewPage * WORDS_PER_PAGE,
+    previewPage * WORDS_PER_PAGE + WORDS_PER_PAGE
+  );
+
   const inputRef = useRef<HTMLInputElement>(null);
 
   const currentWord = queue[0];
@@ -84,8 +94,13 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
   const resetLevel = useCallback(() => {
     if (!currentWord) return;
     setTypedLetters([]);
-    setGameState('preview');
-  }, [currentWord]);
+    if (hasStarted) {
+      setGameState('typing');
+      handleSpeakWord();
+    } else {
+      setGameState('preview');
+    }
+  }, [currentWord, hasStarted, handleSpeakWord]);
 
   useEffect(() => {
     if (currentWord) resetLevel();
@@ -129,6 +144,7 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
   };
 
   const startPlaying = () => {
+    setHasStarted(true);
     setGameState('typing');
     handleSpeakWord();
   };
@@ -204,25 +220,62 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
                 <div className="absolute inset-0 bg-amber-500/95 flex items-center justify-center text-white z-20 backdrop-blur-md p-4 overflow-auto">
                   <div className="text-center animate-in zoom-in duration-300 w-full max-w-full min-w-0 flex flex-col items-center justify-center py-4">
                     <div className="text-5xl sm:text-7xl mb-2 sm:mb-4 shrink-0">🐝</div>
-                    <h3 className="text-xl sm:text-2xl font-black uppercase tracking-widest mb-2 opacity-80 shrink-0">Memorise the Word!</h3>
-                    <div
-                      className={`font-black mb-4 sm:mb-8 tracking-[0.15em] bg-white/20 p-3 sm:p-4 rounded-3xl border-4 border-white/30 drop-shadow-lg w-full max-w-full overflow-hidden flex items-center justify-center min-h-[3.5rem] sm:min-h-[4.5rem] ${
-                        currentWord.word.length > 14 ? 'text-lg sm:text-xl' :
-                        currentWord.word.length > 12 ? 'text-xl sm:text-2xl' :
-                        currentWord.word.length > 10 ? 'text-2xl sm:text-3xl' :
-                        currentWord.word.length > 8 ? 'text-3xl sm:text-4xl' :
-                        currentWord.word.length > 6 ? 'text-4xl sm:text-5xl' : 'text-5xl sm:text-6xl'
-                      }`}
-                    >
-                      <span className="break-all leading-tight">{currentWord.word.toUpperCase()}</span>
+                    <h3 className="text-xl sm:text-2xl font-black uppercase tracking-widest mb-1 opacity-80 shrink-0">
+                      Memorise your words
+                    </h3>
+                    <p className="text-xs sm:text-sm opacity-80 font-bold uppercase tracking-widest mb-4 sm:mb-6">
+                      Swipe or tap to see them all, then press &quot;I am ready&quot;
+                    </p>
+                    <div className="w-full max-w-md sm:max-w-lg mb-4 sm:mb-6">
+                      <div className="flex items-center justify-between text-[10px] sm:text-xs font-black uppercase tracking-widest mb-2 text-amber-100/80">
+                        <span>Daily words</span>
+                        <span>
+                          Page {previewPage + 1} of {totalPages}
+                        </span>
+                      </div>
+                      <div className="flex items-stretch gap-2 sm:gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewPage(p => Math.max(0, p - 1))}
+                          disabled={previewPage === 0}
+                          className="px-3 sm:px-4 py-3 rounded-2xl bg-white/15 border border-white/30 disabled:opacity-40 disabled:cursor-default hover:bg-white/25 transition-colors text-sm font-black"
+                        >
+                          ◀
+                        </button>
+                        <div className="flex-1 bg-white/15 rounded-3xl border-4 border-white/30 px-3 sm:px-5 py-3 sm:py-4 flex flex-col gap-2 sm:gap-3">
+                          {previewWords.length === 0 && (
+                            <div className="text-sm sm:text-base font-bold italic opacity-80">
+                              No words today
+                            </div>
+                          )}
+                          {previewWords.map(w => (
+                            <div
+                              key={w.id}
+                              className="bg-white/15 rounded-2xl border border-white/30 px-3 sm:px-4 py-2 sm:py-3 font-black tracking-[0.15em] text-lg sm:text-2xl break-all"
+                            >
+                              {w.word.toUpperCase()}
+                            </div>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewPage(p => Math.min(totalPages - 1, p + 1))}
+                          disabled={previewPage >= totalPages - 1}
+                          className="px-3 sm:px-4 py-3 rounded-2xl bg-white/15 border border-white/30 disabled:opacity-40 disabled:cursor-default hover:bg-white/25 transition-colors text-sm font-black"
+                        >
+                          ▶
+                        </button>
+                      </div>
                     </div>
                     <button
                       onClick={startPlaying}
                       className="bg-white text-amber-600 px-8 sm:px-12 py-4 sm:py-5 rounded-[2rem] font-black text-xl sm:text-2xl shadow-2xl hover:scale-105 active:scale-95 transition-all flex items-center gap-3 mx-auto shrink-0"
                     >
-                      TYPE THE LETTERS ⌨️
+                      I am ready 🐝
                     </button>
-                    <p className="mt-4 sm:mt-6 text-xs sm:text-sm opacity-60 font-bold uppercase tracking-widest shrink-0">Type one letter at a time</p>
+                    <p className="mt-4 sm:mt-6 text-xs sm:text-sm opacity-80 font-bold uppercase tracking-widest shrink-0">
+                      You&apos;ll hear each word and type the letters in order
+                    </p>
                   </div>
                 </div>
               )}

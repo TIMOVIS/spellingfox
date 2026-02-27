@@ -194,6 +194,20 @@ const App: React.FC = () => {
     };
   }, [state.role, currentStudentId]);
 
+  // Periodic refresh while student is on dashboard so teacher quick-adds (and daily quest pins) show up even if realtime is delayed or off
+  useEffect(() => {
+    if (state.role !== 'student' || !currentStudentId) return;
+    const interval = setInterval(() => {
+      Promise.all([getAllWords(), getDailyQuestWordIds(currentStudentId)])
+        .then(([allWords, dailyWordIds]) => {
+          const wordEntries = allWords.map(convertVocabWordToWordEntry);
+          setState(prev => ({ ...prev, wordBank: wordEntries, dailyWordIds }));
+        })
+        .catch(() => {});
+    }, 20_000);
+    return () => clearInterval(interval);
+  }, [state.role, currentStudentId]);
+
   const toggleRole = () => {
     setState(prev => {
       if (prev.role === 'tutor') {

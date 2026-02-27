@@ -257,7 +257,7 @@ const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQ
                 onClick={() => onStartSpelling(word)}
                 className="bg-orange-500 text-white px-8 py-4 rounded-[1.5rem] font-black text-xl shadow-lg hover:bg-orange-600 hover:scale-105 transition-all flex items-center justify-center gap-3"
               >
-                <span>🐍</span> SPELLING SNAKE
+                <span>🦊</span> WORD BUILDING
               </button>
               <button 
                 onClick={() => onStartSpellingBee(word)}
