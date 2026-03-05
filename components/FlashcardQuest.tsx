@@ -2,12 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import { WordEntry } from '../types';
 import { speakTextWithBrowser } from '../geminiService';
+import { formatWordForDisplay } from '../lib/wordDisplay';
 
 interface FlashcardQuestProps {
   word: WordEntry;
   onClose: () => void;
   onStartQuiz: (word: WordEntry) => void;
   onStartSpelling: (word: WordEntry) => void;
+  onStartDisappearingLetters: (word: WordEntry) => void;
   onStartSpellingBee: (word: WordEntry) => void;
   /** Called when the user closes after viewing (so Daily Quest progress can record flashcard practice). */
   onWordViewed?: (word: WordEntry) => void;
@@ -15,7 +17,7 @@ interface FlashcardQuestProps {
 
 type Step = 'word' | 'meaning' | 'example' | 'synonyms' | 'antonyms';
 
-const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQuiz, onStartSpelling, onStartSpellingBee, onWordViewed }) => {
+const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQuiz, onStartSpelling, onStartDisappearingLetters, onStartSpellingBee, onWordViewed }) => {
   const [step, setStep] = useState<Step>('word');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [activeLetterIndex, setActiveLetterIndex] = useState<number>(-1);
@@ -110,7 +112,7 @@ const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQ
         return (
           <div className="flex flex-col items-center justify-center h-full space-y-8 animate-in fade-in zoom-in-95 duration-300">
             <div className="flex flex-wrap justify-center gap-1 md:gap-2">
-              {word.word.split('').map((char, idx) => (
+              {formatWordForDisplay(word.word).split('').map((char, idx) => (
                 <span 
                   key={idx} 
                   className={`text-5xl md:text-7xl font-black transition-all duration-300 transform rounded-xl px-1 md:px-2 ${
@@ -258,6 +260,12 @@ const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQ
                 className="bg-orange-500 text-white px-8 py-4 rounded-[1.5rem] font-black text-xl shadow-lg hover:bg-orange-600 hover:scale-105 transition-all flex items-center justify-center gap-3"
               >
                 <span>🦊</span> WORD BUILDING
+              </button>
+              <button 
+                onClick={() => onStartDisappearingLetters(word)}
+                className="bg-teal-500 text-white px-8 py-4 rounded-[1.5rem] font-black text-xl shadow-lg hover:bg-teal-600 hover:scale-105 transition-all flex items-center justify-center gap-3"
+              >
+                <span>✨</span> DISAPPEARING LETTERS
               </button>
               <button 
                 onClick={() => onStartSpellingBee(word)}

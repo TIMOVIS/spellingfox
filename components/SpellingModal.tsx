@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { WordEntry } from '../types';
 import { speakText } from '../geminiService';
 import type { WordPracticeResult } from '../lib/supabaseQueries';
+import { formatWordForDisplay } from '../lib/wordDisplay';
 
 interface SpellingModalProps {
   wordEntries: WordEntry[];
@@ -269,7 +270,7 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
               <div className="flex-1 flex flex-col items-center justify-center bg-amber-100 rounded-2xl border-4 border-amber-200 p-6">
                 <div className="text-5xl sm:text-6xl mb-4">🧠</div>
                 <h3 className="text-xl sm:text-2xl font-black uppercase tracking-widest mb-2 text-amber-900">Memorise the word</h3>
-                <p className="text-3xl sm:text-5xl font-black tracking-widest text-amber-950 mb-6 break-all text-center">{currentWord.word.toUpperCase()}</p>
+                <p className="text-3xl sm:text-5xl font-black tracking-widest text-amber-950 mb-6 break-all text-center">{formatWordForDisplay(currentWord.word)}</p>
                 <button
                   onClick={startPlaying}
                   className="bg-amber-500 hover:bg-amber-600 text-white px-8 py-4 rounded-2xl font-black text-xl shadow-lg active:scale-95 transition-all"
@@ -309,7 +310,7 @@ const SpellingModal: React.FC<SpellingModalProps> = ({ wordEntries, onClose, onF
               <div className="flex-1 flex flex-col items-center justify-center bg-emerald-500/95 rounded-2xl border-4 border-emerald-300 p-6 text-white">
                 <div className="text-5xl sm:text-8xl mb-4">🏆</div>
                 <h3 className="text-2xl sm:text-4xl font-black uppercase tracking-tight mb-2">Well done!</h3>
-                <p className="text-xl sm:text-2xl font-bold mb-6 italic text-emerald-100">"{feedback.word.toUpperCase()}"</p>
+                <p className="text-xl sm:text-2xl font-bold mb-6 italic text-emerald-100">"{formatWordForDisplay(feedback.word)}"</p>
                 <button
                   onClick={nextWord}
                   className="bg-white text-emerald-600 py-4 px-8 rounded-2xl font-black text-xl shadow-xl hover:scale-105 active:scale-95"

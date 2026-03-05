@@ -140,12 +140,13 @@ export const generateDailySpellingList = async (yearGroup: YearGroup = 'Year 5')
   const prompt = `Generate a themed set of 5 challenging spelling words for ${yearGroup} UK students. 
     The theme should be a specific curriculum point (e.g., "Silent Letters", "Suffixes -ous/-ious", "Words ending in -cial").
     Provide full dictionary data for each word including literary examples.
+    The DEFINITION for each word must be written so that a 9–10 year old can easily understand it: short sentences, simple everyday words, and no technical grammar terms.
     
     Return your response as a JSON array with the following structure for each word:
     [
       {
         "word": "string",
-        "definition": "string",
+        "definition": "string (child-friendly explanation for a 9–10 year old)",
         "root": "string",
         "origin": "string",
         "synonyms": ["string"],
@@ -208,7 +209,7 @@ export const extractVocabularyFromFile = async (base64Data: string, mimeType: st
         const textContent = atob(base64Data);
         content = [{
           type: 'text',
-          text: `Extract 5 challenging words from this text for Year 3-6 UK students:\n\n${textContent}\n\nFor each word, provide definition, root, antonyms, and an example sentence from well-known children's books (ages 7-12). Return as JSON array.`
+          text: `Extract 5 challenging words from this text for Year 3-6 UK students:\n\n${textContent}\n\nFor each word, provide definition, root, antonyms, and an example sentence from well-known children's books (ages 7-12). The DEFINITION must be written so that a 9–10 year old can easily understand it: short sentences, simple everyday words, and no technical grammar terms. Return as JSON array.`
         }];
       } else {
         throw new Error("PDF files are not directly supported. Please convert to text or image format first.");

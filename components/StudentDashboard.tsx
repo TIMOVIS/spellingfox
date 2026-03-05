@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { WordEntry } from '../types';
 import SpellingModal from './SpellingModal';
+import DisappearingLettersModal from './DisappearingLettersModal';
 import SpellingBeeModal from './SpellingBeeModal';
 import FlashcardQuest from './FlashcardQuest';
 import QuizModal from './QuizModal';
 import { getStudentPracticeHistoryByDate, getTodayLondonDate } from '../lib/supabaseQueries';
 import type { PracticeActivityType } from '../lib/supabaseQueries';
+import { formatWordForDisplay } from '../lib/wordDisplay';
 
 interface StudentDashboardProps {
   studentId: string | null;
@@ -20,6 +22,7 @@ type PracticeDay = { date: string; records: { word_id: string; word: string; act
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wordBank, dailyWordIds, onCompleteExercise }) => {
   const [viewMode, setViewMode] = useState<'hub' | 'wordList' | 'extraWords'>('hub');
   const [showSpelling, setShowSpelling] = useState(false);
+  const [showDisappearingLetters, setShowDisappearingLetters] = useState(false);
   const [showSpellingBee, setShowSpellingBee] = useState(false);
   const [activeFlashcard, setActiveFlashcard] = useState<WordEntry | null>(null);
   const [showQuiz, setShowQuiz] = useState(false);
@@ -30,6 +33,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
   const [showPracticeHistory, setShowPracticeHistory] = useState(false);
   /** Words to use in Spelling modal (daily quest or single word from flashcard/extra). */
   const [wordsForSpelling, setWordsForSpelling] = useState<WordEntry[]>([]);
+  /** When set, Disappearing Letters uses these words (e.g. single word from flashcard); otherwise dailyWords. */
+  const [disappearingLettersWordEntries, setDisappearingLettersWordEntries] = useState<WordEntry[] | null>(null);
   /** When set, Spelling Bee uses these words (e.g. single word from flashcard); otherwise dailyWords. */
   const [spellingBeeWordEntries, setSpellingBeeWordEntries] = useState<WordEntry[] | null>(null);
   /** Filters on "Learn more words" page */
@@ -123,19 +128,20 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
     setExtraWordsPage(1);
   }, [extraYearFilter, extraPatternFilter, extraSearch]);
 
-  // Daily progress = (word × to-do) slots: each word has 3 slots (Daily Quest, Snake, Bee); progress = completed slots / total slots
+  // Daily progress = (word × to-do) slots: each word has 4 slots (Daily Quest, Word building, Disappearing letters, Bee); progress = completed slots / total slots
   const todayDate = getTodayLondonDate();
   const todayRecords = useMemo(
     () => practiceHistory.find(d => d.date === todayDate)?.records ?? [],
     [practiceHistory, todayDate]
   );
-  const totalSlots = dailyWordIds.length * 3; // 3 activities per word
+  const totalSlots = dailyWordIds.length * 4; // 4 activities per word
   const completedSlots = useMemo(() => {
     if (dailyWordIds.length === 0) return 0;
     let n = 0;
     for (const wid of dailyWordIds) {
       if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'flashcard')) n += 1;
       if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_snake')) n += 1;
+      if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'disappearing_letters')) n += 1;
       if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_bee')) n += 1;
     }
     return n;
@@ -144,6 +150,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
   // To-do “fully done” when every daily word has that activity (for checkmarks)
   const dailyQuestDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'flashcard'));
   const spellingSnakeDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_snake'));
+  const disappearingLettersDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'disappearing_letters'));
   const spellingBeeDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_bee')); 
 
   const handleStartSpellingOnly = () => {
@@ -191,7 +198,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
           </div>
 
           <div className="p-10 space-y-8 bg-white">
-            {/* Progress Section — linked to the 3 to-dos; details in My practice */}
+            {/* Progress Section — linked to the 4 to-dos; details in My practice */}
             <div className="space-y-3">
               <div className="flex justify-between items-end">
                 <span className="text-sm font-black text-gray-400 uppercase tracking-widest">Daily Progress</span>
@@ -214,7 +221,10 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
                   {dailyQuestDone ? '✓' : '○'} Daily Quest
                 </span>
                 <span className={spellingSnakeDone ? 'text-emerald-600' : 'text-gray-400'}>
-                  {spellingSnakeDone ? '✓' : '○'} Snake
+                  {spellingSnakeDone ? '✓' : '○'} Word building
+                </span>
+                <span className={disappearingLettersDone ? 'text-emerald-600' : 'text-gray-400'}>
+                  {disappearingLettersDone ? '✓' : '○'} Disappearing letters
                 </span>
                 <span className={spellingBeeDone ? 'text-emerald-600' : 'text-gray-400'}>
                   {spellingBeeDone ? '✓' : '○'} Bee
@@ -250,13 +260,26 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               </button>
 
               <button 
+                onClick={() => dailyWords.length > 0 && setShowDisappearingLetters(true)}
+                disabled={dailyWords.length === 0}
+                className="group relative bg-teal-100 hover:bg-teal-200 text-teal-800 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-teal-200 overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
+              >
+                <div className="relative z-10 flex items-center justify-between">
+                  <div className="text-left">
+                    <span className="block text-3xl font-black">To do 3: Disappearing letters</span>
+                  </div>
+                  <span className="text-5xl group-hover:scale-110 transition-transform">✨</span>
+                </div>
+              </button>
+
+              <button 
                 onClick={() => dailyWords.length > 0 && setShowSpellingBee(true)}
                 disabled={dailyWords.length === 0}
                 className="group relative bg-amber-100 hover:bg-amber-200 text-amber-800 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-amber-200 overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black">To do 3: Spelling Bee</span>
+                    <span className="block text-3xl font-black">To do 4: Spelling Bee</span>
                   </div>
                   <span className="text-5xl group-hover:scale-110 transition-transform">🐝</span>
                 </div>
@@ -318,7 +341,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               dailyWords.map((word) => (
                 <div key={word.id} className="bg-white p-6 rounded-[2rem] shadow-md border-2 border-indigo-50 flex items-center justify-between group hover:border-indigo-200 transition-all">
                   <div className="flex flex-col">
-                    <span className="text-2xl font-black text-gray-900 tracking-tight">{word.word}</span>
+                    <span className="text-2xl font-black text-gray-900 tracking-tight">{formatWordForDisplay(word.word)}</span>
                     <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{word.learningPoint}</span>
                   </div>
                   <button 
@@ -421,7 +444,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
                 {paginatedExtraWords.map((word) => (
                   <div key={word.id} className="bg-white p-6 rounded-[2rem] shadow-md border-2 border-violet-50 flex items-center justify-between group hover:border-violet-200 transition-all">
                     <div className="flex flex-col min-w-0">
-                      <span className="text-2xl font-black text-gray-900 tracking-tight">{word.word}</span>
+                      <span className="text-2xl font-black text-gray-900 tracking-tight">{formatWordForDisplay(word.word)}</span>
                       <span className="text-[10px] font-black text-violet-500 uppercase tracking-widest">{word.learningPoint}</span>
                     </div>
                     <button 
@@ -481,6 +504,30 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
         />
       )}
 
+      {showDisappearingLetters && (
+        <DisappearingLettersModal
+          wordEntries={disappearingLettersWordEntries ?? dailyWords}
+          onClose={() => {
+            setShowDisappearingLetters(false);
+            setDisappearingLettersWordEntries(null);
+          }}
+          onFinish={async (pts, wordResults) => {
+            const opts = wordResults?.length ? { wordResults, activityType: 'disappearing_letters' as const } : undefined;
+            try {
+              await Promise.resolve(onCompleteExercise(pts, opts));
+              if (studentId) {
+                const history = await getStudentPracticeHistoryByDate(studentId, 30);
+                setPracticeHistory(history);
+              }
+            } catch (e) {
+              console.error('Save practice failed:', e);
+            }
+            setShowDisappearingLetters(false);
+            setDisappearingLettersWordEntries(null);
+          }}
+        />
+      )}
+
       {showSpellingBee && (
         <SpellingBeeModal 
           wordEntries={spellingBeeWordEntries ?? dailyWords}
@@ -511,6 +558,11 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
           onClose={() => setActiveFlashcard(null)}
           onStartQuiz={handleQuizFromFlashcard}
           onStartSpelling={handleSpellingFromFlashcard}
+          onStartDisappearingLetters={(word) => {
+            setDisappearingLettersWordEntries([word]);
+            setActiveFlashcard(null);
+            setShowDisappearingLetters(true);
+          }}
           onStartSpellingBee={(word) => {
             setSpellingBeeWordEntries([word]);
             setActiveFlashcard(null);
@@ -565,7 +617,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
             </div>
             <div className="p-4 sm:p-6 overflow-y-auto flex-1 min-h-0">
               {practiceHistory.length === 0 ? (
-                <p className="text-gray-500 font-bold text-center py-8">No practice recorded yet. Complete Spelling Snake or Spelling Bee to see your history here.</p>
+                <p className="text-gray-500 font-bold text-center py-8">No practice recorded yet. Complete Word building, Disappearing letters or Spelling Bee to see your history here.</p>
               ) : (
                 <ul className="space-y-6">
                   {practiceHistory.map(({ date, records }) => {
@@ -585,7 +637,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
                         <ul className="space-y-3">
                           {words.map(([wordId, { word, attempts }]) => (
                             <li key={wordId} className="bg-amber-50 rounded-xl p-3 border border-amber-100">
-                              <div className="font-bold text-amber-950 mb-1.5">{word}</div>
+                              <div className="font-bold text-amber-950 mb-1.5">{formatWordForDisplay(word)}</div>
                               <div className="flex flex-wrap gap-2">
                                 {attempts.map((a, i) => (
                                   <span
@@ -594,7 +646,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
                                       a.correct ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
                                     }`}
                                   >
-                                    {a.activity_type === 'spelling_snake' ? 'Snake' : a.activity_type === 'spelling_bee' ? 'Bee' : a.activity_type === 'flashcard' ? 'Flashcard' : a.activity_type}{' '}
+                                    {a.activity_type === 'spelling_snake' ? 'Word building' : a.activity_type === 'spelling_bee' ? 'Bee' : a.activity_type === 'disappearing_letters' ? 'Disappearing letters' : a.activity_type === 'flashcard' ? 'Flashcard' : a.activity_type}{' '}
                                     {a.correct ? '✓' : '✗'}
                                   </span>
                                 ))}

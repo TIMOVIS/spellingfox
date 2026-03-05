@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { WordEntry, YearGroup } from '../types';
 import { generateWordExplanation, extractVocabularyFromFile, generateDailySpellingList } from '../geminiService';
 import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests, getStudentProgress, getStudentPracticeHistoryByDate, assignWordsToDailyQuest, getTodayLondonDate } from '../lib/supabaseQueries';
+import { formatWordForDisplay } from '../lib/wordDisplay';
 import { VocabWord } from '../lib/supabase';
 
 interface TutorDashboardProps {
@@ -684,7 +685,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
             <div className="flex flex-wrap gap-3 mb-8">
               {recommendedDaily.map(w => (
                 <div key={w.id} className="bg-white border-2 border-amber-200 px-5 py-3 rounded-2xl flex flex-col items-center">
-                  <span className="text-lg font-black text-gray-900">{w.word}</span>
+                  <span className="text-lg font-black text-gray-900">{formatWordForDisplay(w.word)}</span>
                   <span className="text-[10px] uppercase font-bold text-amber-600">{w.yearGroup}</span>
                 </div>
               ))}
@@ -840,7 +841,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                   </div>
                 )}
                 <div>
-                  <h4 className="text-sm font-black text-indigo-800 uppercase tracking-widest mb-3">Practice history (Spelling Snake & Bee)</h4>
+                  <h4 className="text-sm font-black text-indigo-800 uppercase tracking-widest mb-3">Practice history (Word building, Disappearing letters & Bee)</h4>
                   {practiceHistory.length === 0 ? (
                     <p className="text-indigo-600/80 text-sm">No practice recorded yet. The student will see their history under &quot;My practice&quot; after completing activities.</p>
                   ) : (
@@ -854,9 +855,9 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                             {records.map((r, i) => (
                               <li key={`${date}-${i}`} className="flex items-center gap-2 text-gray-900 text-sm">
                                 <span className={r.correct ? 'text-emerald-500 font-bold' : 'text-red-500 font-bold'}>{r.correct ? '✓' : '✗'}</span>
-                                <span className="font-bold">{r.word}</span>
+                                <span className="font-bold">{formatWordForDisplay(r.word)}</span>
                                 <span className="text-xs text-gray-400">
-                                  {r.activity_type === 'spelling_snake' ? 'Snake' : r.activity_type === 'spelling_bee' ? 'Bee' : r.activity_type}
+                                  {r.activity_type === 'spelling_snake' ? 'Word building' : r.activity_type === 'spelling_bee' ? 'Bee' : r.activity_type === 'disappearing_letters' ? 'Disappearing letters' : r.activity_type}
                                 </span>
                               </li>
                             ))}
@@ -890,7 +891,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                   key={w.id}
                   className="bg-white border-2 border-amber-300 text-amber-900 px-4 py-2 rounded-xl text-sm font-black shadow-sm"
                 >
-                  {w.word}
+                  {formatWordForDisplay(w.word)}
                 </span>
               ))}
           </div>
@@ -1019,7 +1020,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                                 : 'bg-white border-gray-200 text-gray-700'
                             }`}
                           >
-                            {q.word?.word ?? '—'}
+                            {q.word?.word != null ? formatWordForDisplay(q.word.word) : '—'}
                             {q.completed && <span className="ml-1.5" title="Completed">✓</span>}
                           </span>
                         ))}
@@ -1159,7 +1160,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                 return (
                   <tr key={w.id} className={`transition-colors group text-sm ${isDaily ? 'bg-amber-50/30' : 'hover:bg-indigo-50/30'}`}>
                     <td className="px-8 py-5">
-                      <div className="font-black text-gray-900 text-lg">{w.word}</div>
+                      <div className="font-black text-gray-900 text-lg">{formatWordForDisplay(w.word)}</div>
                     </td>
                     <td className="px-8 py-5">
                       <button 

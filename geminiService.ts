@@ -41,6 +41,7 @@ export const generateWordExplanation = async (word: string): Promise<Partial<Wor
     5. Classify into Year Group (Year 3-6)
     6. Provide an example sentence from or in the style of famous children's literature (e.g., Roald Dahl, J.K. Rowling, C.S. Lewis)
     7. Include at least 2 clear antonyms
+    8. The DEFINITION must be written so that a 9–10 year old (Year 5) can easily understand it: short sentences, simple everyday words, and no technical grammar terms.
     
     The learning point should be specific and curriculum-focused, relating directly to etymology, morphology, or letter strings.`,
     config: {
@@ -110,7 +111,8 @@ export const generateDailySpellingList = async (yearGroup: YearGroup = 'Year 5')
     2. Morphology information (prefix, base, suffix if applicable)
     3. Letter strings (spelling patterns like "ough", "ous", "tion")
     4. Learning point that relates to the theme (etymology, morphology, or letter strings)
-    5. Full dictionary data including literary examples.`,
+    5. Full dictionary data including literary examples.
+    6. The DEFINITION for each word must be written so that a 9–10 year old can easily understand it: short sentences, simple everyday words, and no technical grammar terms.`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -176,7 +178,8 @@ export const extractVocabularyFromFile = async (base64Data: string, mimeType: st
           2. Morphology information (prefix, base, suffix if applicable)
           3. Letter strings (spelling patterns like "ough", "ous", "tion")
           4. Learning point that relates to etymology, morphology, or letter strings
-          5. Definition, synonyms, antonyms, and an example sentence from well-known children's books (ages 7-12).`
+          5. Definition, synonyms, antonyms, and an example sentence from well-known children's books (ages 7-12).
+          6. The DEFINITION must be written so that a 9–10 year old can easily understand it: short sentences, simple everyday words, and no technical grammar terms.`
         }
       ],
       config: {

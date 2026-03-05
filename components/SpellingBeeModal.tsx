@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { WordEntry } from '../types';
 import { speakText } from '../geminiService';
 import type { WordPracticeResult } from '../lib/supabaseQueries';
+import { formatWordForDisplay } from '../lib/wordDisplay';
 
 interface SpellingBeeModalProps {
   wordEntries: WordEntry[];
@@ -253,7 +254,7 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
                               key={w.id}
                               className="bg-white/15 rounded-2xl border border-white/30 px-3 sm:px-4 py-2 sm:py-3 font-black tracking-[0.15em] text-lg sm:text-2xl break-all"
                             >
-                              {w.word.toUpperCase()}
+                              {formatWordForDisplay(w.word)}
                             </div>
                           ))}
                         </div>
@@ -322,7 +323,7 @@ const SpellingBeeModal: React.FC<SpellingBeeModalProps> = ({ wordEntries, onClos
                   <div className="w-full max-w-full py-4">
                     <div className="text-5xl sm:text-8xl mb-3 sm:mb-6">🏆</div>
                     <h3 className="text-2xl sm:text-5xl font-black mb-2 sm:mb-4 uppercase tracking-tight">WELL DONE!</h3>
-                    <p className="text-base sm:text-2xl font-bold mb-2 sm:mb-4 italic text-emerald-100 break-all">&ldquo;{currentWord.word.toUpperCase()}&rdquo;</p>
+                    <p className="text-base sm:text-2xl font-bold mb-2 sm:mb-4 italic text-emerald-100 break-all">&ldquo;{formatWordForDisplay(currentWord.word)}&rdquo;</p>
                     {hadMistakeOnCurrentWord && (
                       <p className="text-xs sm:text-base font-bold mb-3 sm:mb-6 text-emerald-200">You had a mistake — you&apos;ll try this word again!</p>
                     )}
