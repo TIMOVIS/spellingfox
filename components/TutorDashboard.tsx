@@ -882,17 +882,22 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
               {dailyWordIds.length} word{dailyWordIds.length !== 1 ? 's' : ''}
             </span>
           </h3>
-          <p className="text-amber-800/80 text-sm font-medium mb-3">Words {studentName} will see in their daily list. Unpin from the table below to remove.</p>
+          <p className="text-amber-800/80 text-sm font-medium mb-3">
+            Words {studentName} will see in their daily list. Tap a word here to unpin it from today&apos;s quest.
+          </p>
           <div className="flex flex-wrap gap-2 mb-4">
             {wordBank
               .filter(w => dailyWordIds.includes(w.id))
               .map(w => (
-                <span
+                <button
                   key={w.id}
-                  className="bg-white border-2 border-amber-300 text-amber-900 px-4 py-2 rounded-xl text-sm font-black shadow-sm"
+                  type="button"
+                  onClick={() => onToggleDaily(w.id)}
+                  className="inline-flex items-center gap-2 bg-white border-2 border-amber-300 text-amber-900 px-4 py-2 rounded-xl text-sm font-black shadow-sm hover:bg-amber-100 hover:border-amber-400 active:scale-95 transition-all"
                 >
-                  {formatWordForDisplay(w.word)}
-                </span>
+                  <span>{formatWordForDisplay(w.word)}</span>
+                  <span className="text-[10px] uppercase tracking-widest text-amber-500">Unpin</span>
+                </button>
               ))}
           </div>
           {allStudents.filter(s => s.id !== studentId).length > 0 && (
