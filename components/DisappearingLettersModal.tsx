@@ -241,7 +241,9 @@ const DisappearingLettersModal: React.FC<DisappearingLettersModalProps> = ({ wor
 
             {gameState === 'filling' && (
               <div className="w-full max-w-md mx-auto space-y-6">
-                <p className="text-center text-sm sm:text-base font-bold text-teal-800">Tap the missing letter</p>
+                <p className="text-center text-sm sm:text-base font-bold text-teal-800">
+                  Tap the missing letter in the word, then choose the correct letter tile below to fill the gap.
+                </p>
                 <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
                   {letters.map((letter, i) => {
                     const isHidden = i === hiddenIndex;
@@ -262,16 +264,21 @@ const DisappearingLettersModal: React.FC<DisappearingLettersModalProps> = ({ wor
                     );
                   })}
                 </div>
-                <div className="flex flex-wrap justify-center gap-2 sm:gap-3 pt-4">
-                  {letterOptions.map((letter) => (
-                    <button
-                      key={letter}
-                      onClick={() => handleLetterTap(letter)}
-                      className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl font-black text-xl sm:text-2xl bg-white border-2 border-teal-300 text-teal-900 shadow-md hover:bg-teal-100 hover:scale-105 active:scale-95 transition-all"
-                    >
-                      {letter}
-                    </button>
-                  ))}
+                <div className="pt-2">
+                  <p className="text-center text-[11px] sm:text-xs font-bold text-teal-700 uppercase tracking-widest mb-2">
+                    Pick one letter tile to go into the empty box
+                  </p>
+                  <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+                    {letterOptions.map((letter) => (
+                      <button
+                        key={letter}
+                        onClick={() => handleLetterTap(letter)}
+                        className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl font-black text-xl sm:text-2xl bg-yellow-100 border-2 border-yellow-400 text-teal-900 shadow-md hover:bg-yellow-200 hover:scale-105 active:scale-95 transition-all"
+                      >
+                        {letter}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

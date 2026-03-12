@@ -248,27 +248,27 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               </button>
 
               <button 
-                onClick={handleStartSpellingOnly}
-                className="group relative bg-orange-100 hover:bg-orange-200 text-orange-700 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-orange-200 overflow-hidden"
-              >
-                <div className="relative z-10 flex items-center justify-between">
-                  <div className="text-left">
-                    <span className="block text-3xl font-black">To do 2: Word building</span>
-                  </div>
-                  <span className="text-5xl group-hover:rotate-12 transition-transform">🧩</span>
-                </div>
-              </button>
-
-              <button 
                 onClick={() => dailyWords.length > 0 && setShowDisappearingLetters(true)}
                 disabled={dailyWords.length === 0}
                 className="group relative bg-teal-100 hover:bg-teal-200 text-teal-800 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-teal-200 overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black">To do 3: Disappearing letters</span>
+                    <span className="block text-3xl font-black">To do 2: Disappearing letters</span>
                   </div>
                   <span className="text-5xl group-hover:scale-110 transition-transform">✨</span>
+                </div>
+              </button>
+
+              <button 
+                onClick={handleStartSpellingOnly}
+                className="group relative bg-orange-100 hover:bg-orange-200 text-orange-700 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-orange-200 overflow-hidden"
+              >
+                <div className="relative z-10 flex items-center justify-between">
+                  <div className="text-left">
+                    <span className="block text-3xl font-black">To do 3: Word building</span>
+                  </div>
+                  <span className="text-5xl group-hover:rotate-12 transition-transform">🧩</span>
                 </div>
               </button>
 
