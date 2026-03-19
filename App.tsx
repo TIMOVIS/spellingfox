@@ -58,6 +58,7 @@ const convertVocabWordToWordEntry = (vocabWord: any): WordEntry => {
     definition: vocabWord.definition,
     root: vocabWord.root,
     origin: vocabWord.origin,
+    wordFamily: vocabWord.word_family || undefined,
     synonyms: vocabWord.synonyms || [],
     antonyms: vocabWord.antonyms || [],
     example: vocabWord.example,

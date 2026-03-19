@@ -355,7 +355,7 @@ export const markDailyQuestCompleted = async (
 // PRACTICE RECORDS (student history: which day, which words, right/wrong)
 // ============================================
 
-export type PracticeActivityType = 'spelling_snake' | 'spelling_bee' | 'disappearing_letters' | 'flashcard' | 'quiz';
+export type PracticeActivityType = 'spelling_snake' | 'spelling_bee' | 'disappearing_letters' | 'sentence_ninja' | 'flashcard' | 'quiz';
 
 export interface WordPracticeResult {
   wordId: string;

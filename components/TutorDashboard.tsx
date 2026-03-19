@@ -52,6 +52,8 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   // Filter states
   const [filterYearGroup, setFilterYearGroup] = useState<string>('all');
   const [filterLearningPoint, setFilterLearningPoint] = useState<string>('all');
+  const [filterWordFamily, setFilterWordFamily] = useState<string>('all');
+  const [filterPinnedOnly, setFilterPinnedOnly] = useState<boolean>(false);
   const [filterSearch, setFilterSearch] = useState<string>('');
   const [wordBankPage, setWordBankPage] = useState(1);
   const [editingWord, setEditingWord] = useState<WordEntry | null>(null);
@@ -584,9 +586,16 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   // Get unique values for filters
   const uniqueYearGroups = Array.from(new Set(wordBank.map(w => w.yearGroup))).sort();
   const uniqueLearningPoints = Array.from(new Set(wordBank.map(w => w.learningPoint))).sort();
+  const uniqueWordFamilies = Array.from(
+    new Set(wordBank.map(w => w.wordFamily).filter((wf): wf is string => !!wf && wf.trim().length > 0))
+  ).sort();
 
   // Filter words based on selected criteria
   const filteredWords = wordBank.filter(word => {
+    // Pinned-only filter
+    if (filterPinnedOnly && !dailyWordIds.includes(word.id)) {
+      return false;
+    }
     // Year group filter
     if (filterYearGroup !== 'all' && word.yearGroup !== filterYearGroup) {
       return false;
@@ -596,16 +605,22 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
     if (filterLearningPoint !== 'all' && word.learningPoint !== filterLearningPoint) {
       return false;
     }
+
+    // Word family filter
+    if (filterWordFamily !== 'all' && word.wordFamily !== filterWordFamily) {
+      return false;
+    }
     
-    // Search filter (searches word, definition, learning point)
+    // Search filter (searches word, definition, learning point, root, word family)
     if (filterSearch.trim()) {
       const searchLower = filterSearch.toLowerCase();
       const matchesWord = word.word.toLowerCase().includes(searchLower);
       const matchesDefinition = word.definition.toLowerCase().includes(searchLower);
       const matchesLearningPoint = word.learningPoint.toLowerCase().includes(searchLower);
       const matchesRoot = word.root?.toLowerCase().includes(searchLower);
+      const matchesWordFamily = word.wordFamily?.toLowerCase().includes(searchLower);
       
-      if (!matchesWord && !matchesDefinition && !matchesLearningPoint && !matchesRoot) {
+      if (!matchesWord && !matchesDefinition && !matchesLearningPoint && !matchesRoot && !matchesWordFamily) {
         return false;
       }
     }
@@ -616,6 +631,8 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const clearFilters = () => {
     setFilterYearGroup('all');
     setFilterLearningPoint('all');
+    setFilterWordFamily('all');
+    setFilterPinnedOnly(false);
     setFilterSearch('');
   };
 
@@ -629,7 +646,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   // Reset to page 1 when filters change
   useEffect(() => {
     setWordBankPage(1);
-  }, [filterYearGroup, filterLearningPoint, filterSearch]);
+  }, [filterYearGroup, filterLearningPoint, filterWordFamily, filterPinnedOnly, filterSearch]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-4 duration-500 pb-20">
@@ -841,7 +858,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                   </div>
                 )}
                 <div>
-                  <h4 className="text-sm font-black text-indigo-800 uppercase tracking-widest mb-3">Practice history (Word building, Disappearing letters & Bee)</h4>
+                  <h4 className="text-sm font-black text-indigo-800 uppercase tracking-widest mb-3">Practice history (Sentence Ninja, Word building, Disappearing letters & Bee)</h4>
                   {practiceHistory.length === 0 ? (
                     <p className="text-indigo-600/80 text-sm">No practice recorded yet. The student will see their history under &quot;My practice&quot; after completing activities.</p>
                   ) : (
@@ -857,7 +874,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                                 <span className={r.correct ? 'text-emerald-500 font-bold' : 'text-red-500 font-bold'}>{r.correct ? '✓' : '✗'}</span>
                                 <span className="font-bold">{formatWordForDisplay(r.word)}</span>
                                 <span className="text-xs text-gray-400">
-                                  {r.activity_type === 'spelling_snake' ? 'Word building' : r.activity_type === 'spelling_bee' ? 'Bee' : r.activity_type === 'disappearing_letters' ? 'Disappearing letters' : r.activity_type}
+                                  {r.activity_type === 'spelling_snake' ? 'Word building' : r.activity_type === 'spelling_bee' ? 'Bee' : r.activity_type === 'disappearing_letters' ? 'Disappearing letters' : r.activity_type === 'sentence_ninja' ? 'Sentence Ninja' : r.activity_type}
                                 </span>
                               </li>
                             ))}
@@ -1071,10 +1088,21 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
             </h3>
             <div className="flex items-center gap-3 flex-wrap">
                <span className="bg-white px-4 py-1.5 rounded-full border text-xs font-black text-indigo-600 shadow-sm">
-                 {filteredWords.length} {filteredWords.length === wordBank.length ? 'Words' : `of ${wordBank.length} Words`}
+                 {filteredWords.length} {filteredWords.length === wordBank.length && !filterPinnedOnly ? 'Words' : `of ${wordBank.length} Words`}
                  {wordBankTotalPages > 1 && ` · Page ${wordBankPage} of ${wordBankTotalPages}`}
                </span>
-               <span className="bg-amber-100 px-4 py-1.5 rounded-full border border-amber-200 text-xs font-black text-amber-700 shadow-sm">{dailyWordIds.length} Pin to Quest</span>
+               <button
+                 type="button"
+                 onClick={() => setFilterPinnedOnly(prev => !prev)}
+                 className={`px-4 py-1.5 rounded-full border text-xs font-black shadow-sm transition-all ${
+                   filterPinnedOnly
+                     ? 'bg-amber-500 border-amber-600 text-white'
+                     : 'bg-amber-100 border-amber-200 text-amber-700 hover:bg-amber-200'
+                 }`}
+                 title="Click to show only words that are pinned to today's quest"
+               >
+                 {dailyWordIds.length} Pin to Quest{filterPinnedOnly ? ' · Showing pinned only' : ''}
+               </button>
                {wordBank.some(needsEnriching) && (
                  <button
                    onClick={handleEnrichAll}
@@ -1099,7 +1127,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
           </div>
 
           {/* Filter Controls */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             {/* Search Filter */}
             <div className="md:col-span-2">
               <input
@@ -1124,19 +1152,31 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
             </select>
 
             {/* Learning Point Filter (Prefix/Suffix) */}
+            <select
+              value={filterLearningPoint}
+              onChange={(e) => setFilterLearningPoint(e.target.value)}
+              className="bg-white border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-bold text-sm text-gray-900 cursor-pointer"
+            >
+              <option value="all">All Patterns</option>
+              {uniqueLearningPoints.map(lp => (
+                <option key={lp} value={lp}>{lp}</option>
+              ))}
+            </select>
+
+            {/* Word family filter */}
             <div className="flex gap-2">
               <select
-                value={filterLearningPoint}
-                onChange={(e) => setFilterLearningPoint(e.target.value)}
-                className="flex-1 bg-white border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-bold text-sm text-gray-900 cursor-pointer"
+                value={filterWordFamily}
+                onChange={(e) => setFilterWordFamily(e.target.value)}
+                className="flex-1 bg-white border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 outline-none transition-all font-bold text-sm text-gray-900 cursor-pointer"
               >
-                <option value="all">All Patterns</option>
-                {uniqueLearningPoints.map(lp => (
-                  <option key={lp} value={lp}>{lp}</option>
+                <option value="all">All families</option>
+                {uniqueWordFamilies.map(fam => (
+                  <option key={fam} value={fam}>{fam}</option>
                 ))}
               </select>
               
-              {(filterYearGroup !== 'all' || filterLearningPoint !== 'all' || filterSearch.trim()) && (
+              {(filterYearGroup !== 'all' || filterLearningPoint !== 'all' || filterWordFamily !== 'all' || filterPinnedOnly || filterSearch.trim()) && (
                 <button
                   onClick={clearFilters}
                   className="bg-gray-200 text-gray-700 px-4 py-2.5 rounded-xl font-bold hover:bg-gray-300 transition-all text-sm"
@@ -1166,6 +1206,14 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                   <tr key={w.id} className={`transition-colors group text-sm ${isDaily ? 'bg-amber-50/30' : 'hover:bg-indigo-50/30'}`}>
                     <td className="px-8 py-5">
                       <div className="font-black text-gray-900 text-lg">{formatWordForDisplay(w.word)}</div>
+                      {w.wordFamily && (
+                        <div className="mt-1">
+                          <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-3 py-0.5 text-[10px] font-black uppercase tracking-widest text-blue-700">
+                            <span className="text-[11px]">🧭</span>
+                            <span>Word family: {w.wordFamily}</span>
+                          </span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-8 py-5">
                       <button 

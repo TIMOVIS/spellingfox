@@ -12,6 +12,8 @@ export interface VocabWord {
   definition: string;
   root?: string;
   origin?: string;
+  /** Optional semantic/word family label, e.g. "walk family" */
+  word_family?: string | null;
   etymology?: any;
   morphology?: any;
   letter_strings?: string[];
@@ -64,7 +66,7 @@ export interface VocabPracticeRecord {
   student_id: string;
   word_id: string;
   practice_date: string;
-  activity_type: 'spelling_snake' | 'spelling_bee' | 'flashcard' | 'quiz';
+  activity_type: 'spelling_snake' | 'spelling_bee' | 'disappearing_letters' | 'sentence_ninja' | 'flashcard' | 'quiz';
   correct: boolean;
   details?: Record<string, unknown>;
   created_at?: string;

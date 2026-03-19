@@ -9,6 +9,8 @@ export interface WordEntry {
   definition: string;
   root?: string;
   origin?: string;
+  /** Optional semantic/word family label, e.g. "walk family" */
+  wordFamily?: string;
   synonyms: string[];
   antonyms: string[];
   example: string;

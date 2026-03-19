@@ -3,6 +3,7 @@ import { WordEntry } from '../types';
 import SpellingModal from './SpellingModal';
 import DisappearingLettersModal from './DisappearingLettersModal';
 import SpellingBeeModal from './SpellingBeeModal';
+import SentenceNinjaModal from './SentenceNinjaModal';
 import FlashcardQuest from './FlashcardQuest';
 import QuizModal from './QuizModal';
 import { getStudentPracticeHistoryByDate, getTodayLondonDate } from '../lib/supabaseQueries';
@@ -22,6 +23,7 @@ type PracticeDay = { date: string; records: { word_id: string; word: string; act
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wordBank, dailyWordIds, onCompleteExercise }) => {
   const [viewMode, setViewMode] = useState<'hub' | 'wordList' | 'extraWords'>('hub');
   const [showSpelling, setShowSpelling] = useState(false);
+  const [showSentenceNinja, setShowSentenceNinja] = useState(false);
   const [showDisappearingLetters, setShowDisappearingLetters] = useState(false);
   const [showSpellingBee, setShowSpellingBee] = useState(false);
   const [activeFlashcard, setActiveFlashcard] = useState<WordEntry | null>(null);
@@ -128,18 +130,19 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
     setExtraWordsPage(1);
   }, [extraYearFilter, extraPatternFilter, extraSearch]);
 
-  // Daily progress = (word × to-do) slots: each word has 4 slots (Daily Quest, Word building, Disappearing letters, Bee); progress = completed slots / total slots
+  // Daily progress = (word × to-do) slots: each word has 5 slots (Daily Quest, Sentence Ninja, Disappearing letters, Word building, Bee); progress = completed slots / total slots
   const todayDate = getTodayLondonDate();
   const todayRecords = useMemo(
     () => practiceHistory.find(d => d.date === todayDate)?.records ?? [],
     [practiceHistory, todayDate]
   );
-  const totalSlots = dailyWordIds.length * 4; // 4 activities per word
+  const totalSlots = dailyWordIds.length * 5; // 5 activities per word
   const completedSlots = useMemo(() => {
     if (dailyWordIds.length === 0) return 0;
     let n = 0;
     for (const wid of dailyWordIds) {
       if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'flashcard')) n += 1;
+      if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'sentence_ninja')) n += 1;
       if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_snake')) n += 1;
       if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'disappearing_letters')) n += 1;
       if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_bee')) n += 1;
@@ -149,6 +152,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
   const progressPercent = totalSlots === 0 ? 0 : Math.round((completedSlots / totalSlots) * 100);
   // To-do “fully done” when every daily word has that activity (for checkmarks)
   const dailyQuestDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'flashcard'));
+  const sentenceNinjaDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'sentence_ninja'));
   const spellingSnakeDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_snake'));
   const disappearingLettersDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'disappearing_letters'));
   const spellingBeeDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_bee')); 
@@ -220,6 +224,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
                 <span className={dailyQuestDone ? 'text-emerald-600' : 'text-gray-400'}>
                   {dailyQuestDone ? '✓' : '○'} Daily Quest
                 </span>
+                <span className={sentenceNinjaDone ? 'text-emerald-600' : 'text-gray-400'}>
+                  {sentenceNinjaDone ? '✓' : '○'} Sentence Ninja
+                </span>
                 <span className={spellingSnakeDone ? 'text-emerald-600' : 'text-gray-400'}>
                   {spellingSnakeDone ? '✓' : '○'} Word building
                 </span>
@@ -248,13 +255,26 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               </button>
 
               <button 
+                onClick={() => dailyWords.length > 0 && setShowSentenceNinja(true)}
+                disabled={dailyWords.length === 0}
+                className="group relative bg-indigo-100 hover:bg-indigo-200 text-indigo-800 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-indigo-200 overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
+              >
+                <div className="relative z-10 flex items-center justify-between">
+                  <div className="text-left">
+                    <span className="block text-3xl font-black">To do 2: Sentence Ninja</span>
+                  </div>
+                  <span className="text-5xl group-hover:scale-110 transition-transform">🥷</span>
+                </div>
+              </button>
+
+              <button 
                 onClick={() => dailyWords.length > 0 && setShowDisappearingLetters(true)}
                 disabled={dailyWords.length === 0}
                 className="group relative bg-teal-100 hover:bg-teal-200 text-teal-800 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-teal-200 overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black">To do 2: Disappearing letters</span>
+                    <span className="block text-3xl font-black">To do 3: Disappearing letters</span>
                   </div>
                   <span className="text-5xl group-hover:scale-110 transition-transform">✨</span>
                 </div>
@@ -266,7 +286,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black">To do 3: Word building</span>
+                    <span className="block text-3xl font-black">To do 4: Word building</span>
                   </div>
                   <span className="text-5xl group-hover:rotate-12 transition-transform">🧩</span>
                 </div>
@@ -279,7 +299,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black">To do 4: Spelling Bee</span>
+                    <span className="block text-3xl font-black">To do 5: Spelling Bee</span>
                   </div>
                   <span className="text-5xl group-hover:scale-110 transition-transform">🐝</span>
                 </div>
@@ -504,6 +524,26 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
         />
       )}
 
+      {showSentenceNinja && (
+        <SentenceNinjaModal
+          wordEntries={dailyWords}
+          onClose={() => setShowSentenceNinja(false)}
+          onFinish={async (pts, wordResults) => {
+            const opts = wordResults?.length ? { wordResults, activityType: 'sentence_ninja' as const } : undefined;
+            try {
+              await Promise.resolve(onCompleteExercise(pts, opts));
+              if (studentId) {
+                const history = await getStudentPracticeHistoryByDate(studentId, 30);
+                setPracticeHistory(history);
+              }
+            } catch (e) {
+              console.error('Save practice failed:', e);
+            }
+            setShowSentenceNinja(false);
+          }}
+        />
+      )}
+
       {showDisappearingLetters && (
         <DisappearingLettersModal
           wordEntries={disappearingLettersWordEntries ?? dailyWords}
@@ -617,7 +657,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
             </div>
             <div className="p-4 sm:p-6 overflow-y-auto flex-1 min-h-0">
               {practiceHistory.length === 0 ? (
-                <p className="text-gray-500 font-bold text-center py-8">No practice recorded yet. Complete Word building, Disappearing letters or Spelling Bee to see your history here.</p>
+                <p className="text-gray-500 font-bold text-center py-8">No practice recorded yet. Complete Sentence Ninja, Word building, Disappearing letters or Spelling Bee to see your history here.</p>
               ) : (
                 <ul className="space-y-6">
                   {practiceHistory.map(({ date, records }) => {
@@ -646,7 +686,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
                                       a.correct ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
                                     }`}
                                   >
-                                    {a.activity_type === 'spelling_snake' ? 'Word building' : a.activity_type === 'spelling_bee' ? 'Bee' : a.activity_type === 'disappearing_letters' ? 'Disappearing letters' : a.activity_type === 'flashcard' ? 'Flashcard' : a.activity_type}{' '}
+                                    {a.activity_type === 'spelling_snake' ? 'Word building' : a.activity_type === 'spelling_bee' ? 'Bee' : a.activity_type === 'disappearing_letters' ? 'Disappearing letters' : a.activity_type === 'sentence_ninja' ? 'Sentence Ninja' : a.activity_type === 'flashcard' ? 'Flashcard' : a.activity_type}{' '}
                                     {a.correct ? '✓' : '✗'}
                                   </span>
                                 ))}
