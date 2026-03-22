@@ -27,6 +27,7 @@ const convertVocabWordToWordEntry = (vocabWord: VocabWord): WordEntry => {
     definition: vocabWord.definition,
     root: vocabWord.root,
     origin: vocabWord.origin,
+    wordFamily: vocabWord.word_family || undefined,
     synonyms: vocabWord.synonyms || [],
     antonyms: vocabWord.antonyms || [],
     example: vocabWord.example,
@@ -505,13 +506,14 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
     }
   };
 
-  /** True if word has placeholder example or empty synonyms/antonyms and should be filled by AI */
+  /** True if word is missing definition, placeholder example, or empty synonyms/antonyms — AI can fill these */
   const needsEnriching = (w: WordEntry) => {
+    const missingDefinition = !w.definition?.trim();
     const placeholderExample = /example (sentence )?to be (updated|provided) by (the )?teacher/i;
     const emptyExample = !w.example?.trim() || placeholderExample.test(w.example);
     const emptySynonyms = !w.synonyms?.length;
     const emptyAntonyms = !w.antonyms?.length;
-    return emptyExample || emptySynonyms || emptyAntonyms;
+    return missingDefinition || emptyExample || emptySynonyms || emptyAntonyms;
   };
 
   const handleEnrichWord = async (w: WordEntry) => {
@@ -520,6 +522,9 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
     try {
       const aiData = await generateWordExplanation(w.word);
       const updates: Partial<VocabWord> = {};
+      if (aiData.definition?.trim() && !w.definition?.trim()) {
+        updates.definition = aiData.definition.trim();
+      }
       if (aiData.example?.trim()) updates.example = aiData.example;
       if (aiData.synonyms?.length) updates.synonyms = aiData.synonyms;
       if (aiData.antonyms?.length) updates.antonyms = aiData.antonyms;
@@ -544,7 +549,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const handleEnrichAll = async () => {
     const toEnrich = wordBank.filter(needsEnriching);
     if (toEnrich.length === 0) {
-      setError('No words need enriching. All have examples, synonyms, and antonyms.');
+      setError('No words need enriching. All have definitions, examples, synonyms, and antonyms.');
       return;
     }
     setEnrichingAll(true);
@@ -555,6 +560,9 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
       try {
         const aiData = await generateWordExplanation(w.word);
         const updates: Partial<VocabWord> = {};
+        if (aiData.definition?.trim() && !w.definition?.trim()) {
+          updates.definition = aiData.definition.trim();
+        }
         if (aiData.example?.trim()) updates.example = aiData.example;
         if (aiData.synonyms?.length) updates.synonyms = aiData.synonyms;
         if (aiData.antonyms?.length) updates.antonyms = aiData.antonyms;
