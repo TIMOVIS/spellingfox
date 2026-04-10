@@ -527,14 +527,27 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
     }
   };
 
-  /** True if word is missing definition, placeholder example, or empty synonyms/antonyms — AI can fill these */
+  /** True if word has missing core content or missing curriculum metadata. */
   const needsEnriching = (w: WordEntry) => {
     const missingDefinition = !w.definition?.trim();
     const placeholderExample = /example (sentence )?to be (updated|provided) by (the )?teacher/i;
     const emptyExample = !w.example?.trim() || placeholderExample.test(w.example);
     const emptySynonyms = !w.synonyms?.length;
     const emptyAntonyms = !w.antonyms?.length;
-    return missingDefinition || emptyExample || emptySynonyms || emptyAntonyms;
+    const missingPartOfSpeech = !w.partOfSpeech?.trim();
+    const emptyGrammar = !w.grammar?.length;
+    const emptyWriting = !w.writing?.length;
+    const emptySemantic = !w.semantic?.length;
+    return (
+      missingDefinition ||
+      emptyExample ||
+      emptySynonyms ||
+      emptyAntonyms ||
+      missingPartOfSpeech ||
+      emptyGrammar ||
+      emptyWriting ||
+      emptySemantic
+    );
   };
 
   const handleEnrichWord = async (w: WordEntry) => {
@@ -570,7 +583,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const handleEnrichAll = async () => {
     const toEnrich = wordBank.filter(needsEnriching);
     if (toEnrich.length === 0) {
-      setError('No words need enriching. All have definitions, examples, synonyms, and antonyms.');
+      setError('No words need enriching. Core content and curriculum fields are already filled.');
       return;
     }
     setEnrichingAll(true);

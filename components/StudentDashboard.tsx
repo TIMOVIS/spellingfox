@@ -1,7 +1,10 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { WordEntry } from '../types';
 import FlashcardQuest from './FlashcardQuest';
 import QuizModal from './QuizModal';
+import SpellingModal from './SpellingModal';
+import SpellingBeeModal from './SpellingBeeModal';
+import DisappearingLettersModal from './DisappearingLettersModal';
 import {
   getStudentPracticeHistoryByDate,
   getTodayLondonDate,
@@ -16,6 +19,8 @@ import { supabase } from '../lib/supabase';
 
 interface StudentDashboardProps {
   studentId: string | null;
+  /** Incremented in App when `vocab_student_assignments` changes for this student (realtime). */
+  assignmentRefreshTick?: number;
   name: string;
   wordBank: WordEntry[];
   dailyWordIds: string[];
@@ -24,13 +29,16 @@ interface StudentDashboardProps {
 
 type PracticeDay = { date: string; records: { word_id: string; word: string; activity_type: string; correct: boolean }[] };
 
-const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wordBank, dailyWordIds, onCompleteExercise }) => {
+const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignmentRefreshTick, name, wordBank, dailyWordIds, onCompleteExercise }) => {
   const [viewMode, setViewMode] = useState<'hub' | 'wordList' | 'extraWords'>('hub');
   const [activeFlashcard, setActiveFlashcard] = useState<WordEntry | null>(null);
   const [showQuiz, setShowQuiz] = useState(false);
   const [quizWords, setQuizWords] = useState<string[]>([]);
   /** When quiz is opened from flashcard, keep WordEntry(s) so we can save quiz practice to My practice. */
   const [quizWordEntries, setQuizWordEntries] = useState<WordEntry[] | null>(null);
+  const [spellingWords, setSpellingWords] = useState<WordEntry[] | null>(null);
+  const [spellingBeeWords, setSpellingBeeWords] = useState<WordEntry[] | null>(null);
+  const [disappearingWords, setDisappearingWords] = useState<WordEntry[] | null>(null);
   const [practiceHistory, setPracticeHistory] = useState<PracticeDay[]>([]);
   const [showPracticeHistory, setShowPracticeHistory] = useState(false);
   const [teacherAssignments, setTeacherAssignments] = useState<VocabStudentAssignment[]>([]);
@@ -46,8 +54,20 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
     if (!studentId) return;
     getStudentAssignments(studentId)
       .then(setTeacherAssignments)
-      .catch(() => setTeacherAssignments([]));
+      .catch((e) => {
+        console.error('getStudentAssignments failed:', e);
+        setTeacherAssignments([]);
+      });
   }, [studentId]);
+
+  const assignmentTickRef = useRef(0);
+  useEffect(() => {
+    if (!studentId) return;
+    const t = assignmentRefreshTick ?? 0;
+    if (t === assignmentTickRef.current) return;
+    assignmentTickRef.current = t;
+    refreshAssignments();
+  }, [assignmentRefreshTick, studentId, refreshAssignments]);
 
   useEffect(() => {
     if (!studentId) return;
@@ -70,6 +90,20 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
     if (!studentId) return;
     const t = setInterval(() => refreshAssignments(), 20_000);
     return () => clearInterval(t);
+  }, [studentId, refreshAssignments]);
+
+  useEffect(() => {
+    if (!studentId) return;
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshAssignments();
+    };
+    const onFocus = () => refreshAssignments();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+    };
   }, [studentId, refreshAssignments]);
 
   useEffect(() => {
@@ -198,6 +232,24 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
     setShowQuiz(true);
   };
 
+  const openDailySpelling = (entries: WordEntry[]) => {
+    if (entries.length === 0) return;
+    setActiveFlashcard(null);
+    setSpellingWords(entries);
+  };
+
+  const openDailySpellingBee = (entries: WordEntry[]) => {
+    if (entries.length === 0) return;
+    setActiveFlashcard(null);
+    setSpellingBeeWords(entries);
+  };
+
+  const openDailyDisappearingLetters = (entries: WordEntry[]) => {
+    if (entries.length === 0) return;
+    setActiveFlashcard(null);
+    setDisappearingWords(entries);
+  };
+
   return (
     <div className="max-w-2xl mx-auto py-12 px-4 animate-in fade-in slide-in-from-bottom-8 duration-700">
       {viewMode === 'hub' ? (
@@ -219,6 +271,11 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
           </div>
 
           <div className="p-10 space-y-8 bg-white">
+            {!studentId && (
+              <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-5 py-4 text-sm font-bold text-amber-950">
+                We couldn&apos;t link this session to your saved student profile, so teacher-assigned writing tasks won&apos;t load. Check your internet connection, ask your teacher to confirm your name matches exactly, then refresh the page and sign in again.
+              </div>
+            )}
             {/* Progress Section — linked to the 4 to-dos; details in My practice */}
             <div className="space-y-3">
               <div className="flex justify-between items-end">
@@ -360,21 +417,46 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
 
           <div className="space-y-4">
             {dailyWords.length > 0 ? (
-              dailyWords.map((word) => (
-                <div key={word.id} className="bg-white p-6 rounded-[2rem] shadow-md border-2 border-indigo-50 flex items-center justify-between group hover:border-indigo-200 transition-all">
-                  <div className="flex flex-col">
-                    <span className="text-2xl font-black text-gray-900 tracking-tight">{formatWordForDisplay(word.word)}</span>
-                    <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{word.learningPoint}</span>
-                  </div>
-                  <button 
-                    onClick={() => handleMasterWord(word)}
-                    className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-black shadow-md hover:bg-indigo-700 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+              <>
+                <div className="bg-indigo-50 border-2 border-indigo-100 rounded-[2rem] p-5 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => openDailySpelling(dailyWords)}
+                    className="bg-orange-500 text-white px-5 py-3 rounded-xl font-black text-sm shadow-sm hover:bg-orange-600 active:scale-95 transition-all"
                   >
-                    <span>MASTER</span>
-                    <span className="text-xl">🚀</span>
+                    🧩 Word building ({dailyWords.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openDailySpellingBee(dailyWords)}
+                    className="bg-amber-500 text-white px-5 py-3 rounded-xl font-black text-sm shadow-sm hover:bg-amber-600 active:scale-95 transition-all"
+                  >
+                    🐝 Spelling bee ({dailyWords.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openDailyDisappearingLetters(dailyWords)}
+                    className="bg-teal-500 text-white px-5 py-3 rounded-xl font-black text-sm shadow-sm hover:bg-teal-600 active:scale-95 transition-all"
+                  >
+                    ✨ Disappearing letters ({dailyWords.length})
                   </button>
                 </div>
-              ))
+                {dailyWords.map((word) => (
+                  <div key={word.id} className="bg-white p-6 rounded-[2rem] shadow-md border-2 border-indigo-50 flex items-center justify-between group hover:border-indigo-200 transition-all">
+                    <div className="flex flex-col">
+                      <span className="text-2xl font-black text-gray-900 tracking-tight">{formatWordForDisplay(word.word)}</span>
+                      <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">{word.learningPoint}</span>
+                    </div>
+                    <button 
+                      onClick={() => handleMasterWord(word)}
+                      className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-black shadow-md hover:bg-indigo-700 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
+                    >
+                      <span>MASTER</span>
+                      <span className="text-xl">🚀</span>
+                    </button>
+                  </div>
+                ))}
+              </>
             ) : (
               <div className="text-center py-20 bg-white rounded-[3rem] border-4 border-dashed border-gray-100">
                 <span className="text-6xl block mb-4">🎈</span>
@@ -511,6 +593,9 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
           word={activeFlashcard}
           onClose={() => setActiveFlashcard(null)}
           onStartQuiz={handleQuizFromFlashcard}
+          onStartSpelling={(word) => openDailySpelling([word])}
+          onStartSpellingBee={(word) => openDailySpellingBee([word])}
+          onStartDisappearingLetters={(word) => openDailyDisappearingLetters([word])}
           onWordViewed={(word) => {
             onCompleteExercise(0, {
               wordResults: [{ wordId: word.id, word: word.word, correct: true }],
@@ -544,6 +629,51 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
             }
             setShowQuiz(false);
             setQuizWordEntries(null);
+          }}
+        />
+      )}
+
+      {spellingWords && (
+        <SpellingModal
+          wordEntries={spellingWords}
+          onClose={() => setSpellingWords(null)}
+          onFinish={async (pts, wordResults) => {
+            await Promise.resolve(onCompleteExercise(pts, {
+              wordResults: wordResults ?? spellingWords.map(w => ({ wordId: w.id, word: w.word, correct: true })),
+              activityType: 'spelling_snake',
+            }));
+            if (studentId) getStudentPracticeHistoryByDate(studentId, 30).then(setPracticeHistory).catch(() => {});
+            setSpellingWords(null);
+          }}
+        />
+      )}
+
+      {spellingBeeWords && (
+        <SpellingBeeModal
+          wordEntries={spellingBeeWords}
+          onClose={() => setSpellingBeeWords(null)}
+          onFinish={async (pts, wordResults) => {
+            await Promise.resolve(onCompleteExercise(pts, {
+              wordResults: wordResults ?? spellingBeeWords.map(w => ({ wordId: w.id, word: w.word, correct: true })),
+              activityType: 'spelling_bee',
+            }));
+            if (studentId) getStudentPracticeHistoryByDate(studentId, 30).then(setPracticeHistory).catch(() => {});
+            setSpellingBeeWords(null);
+          }}
+        />
+      )}
+
+      {disappearingWords && (
+        <DisappearingLettersModal
+          wordEntries={disappearingWords}
+          onClose={() => setDisappearingWords(null)}
+          onFinish={async (pts, wordResults) => {
+            await Promise.resolve(onCompleteExercise(pts, {
+              wordResults: wordResults ?? disappearingWords.map(w => ({ wordId: w.id, word: w.word, correct: true })),
+              activityType: 'disappearing_letters',
+            }));
+            if (studentId) getStudentPracticeHistoryByDate(studentId, 30).then(setPracticeHistory).catch(() => {});
+            setDisappearingWords(null);
           }}
         />
       )}

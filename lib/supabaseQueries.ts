@@ -442,9 +442,9 @@ export const insertStudentAssignments = async (
   const rows = items.map((item, i) => ({
     student_id: studentId,
     exercise_type: item.exercise_type ?? null,
-    title: item.title,
-    student_instructions: item.student_instructions,
-    main_content: item.main_content,
+    title: (item.title ?? 'Writing exercise').trim() || 'Writing exercise',
+    student_instructions: item.student_instructions?.trim() ?? '',
+    main_content: item.main_content?.trim() ?? '',
     options: item.options ?? [],
     sort_order: item.sort_order ?? i,
   }));

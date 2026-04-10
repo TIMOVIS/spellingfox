@@ -115,8 +115,46 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
     <div className="writing-ex-modal-root fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 print:static print:inset-auto print:min-h-0 print:bg-white print:p-0">
       <style>{`
         @media print {
-          .writing-ex-modal-root { background: white !important; }
-          .writing-ex-modal-root .no-print { display: none !important; }
+          @page {
+            margin: 12mm;
+          }
+          html, body {
+            background: white !important;
+            height: auto !important;
+            overflow: visible !important;
+          }
+          /* Hide the entire app; only the worksheet subtree is shown (see below). */
+          body * {
+            visibility: hidden;
+          }
+          .print-exercise-sheet,
+          .print-exercise-sheet * {
+            visibility: visible;
+          }
+          .print-exercise-sheet .no-print {
+            display: none !important;
+            visibility: hidden !important;
+          }
+          .print-exercise-sheet {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            max-width: none;
+            background: white;
+            padding: 0;
+            margin: 0;
+          }
+          .writing-ex-modal-root {
+            position: static !important;
+            inset: auto !important;
+            display: block !important;
+            background: white !important;
+            padding: 0 !important;
+          }
+          .writing-ex-modal-root .no-print {
+            display: none !important;
+          }
         }
       `}</style>
       <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[92vh] overflow-hidden flex flex-col print:shadow-none print:max-w-none print:max-h-none print:rounded-none print:overflow-visible">

@@ -68,6 +68,8 @@ const App: React.FC = () => {
   const [studentEnteredName, setStudentEnteredName] = useState(false);
   const [loadingStudent, setLoadingStudent] = useState(false);
   const [currentStudentId, setCurrentStudentId] = useState<string | null>(null);
+  /** Bumped when Supabase signals new/updated teacher assignments for the signed-in student (realtime). */
+  const [assignmentRefreshTick, setAssignmentRefreshTick] = useState(0);
 
   // Load students from Supabase on mount
   useEffect(() => {
@@ -175,6 +177,16 @@ const App: React.FC = () => {
         { event: 'INSERT', schema: 'public', table: 'vocab_words' },
         refresh
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'vocab_student_assignments',
+          filter: `student_id=eq.${currentStudentId}`
+        },
+        () => setAssignmentRefreshTick(t => t + 1)
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -266,14 +278,39 @@ const App: React.FC = () => {
       setStudentEnteredName(true);
     } catch (error) {
       console.error('Failed to load student:', error);
-      // Still allow them to proceed with basic data
-      setState(prev => ({
-        ...prev,
-        studentName: name.trim(),
-        wordBank: [],
-        dailyWordIds: []
-      }));
-      setStudentEnteredName(true);
+      // Recover UUID when the student row exists but a later step failed (otherwise teacher assignments never load).
+      try {
+        const allStudents = await getAllStudents();
+        const recovered = allStudents.find(s => s.name.toLowerCase() === name.trim().toLowerCase());
+        if (recovered) {
+          setCurrentStudentId(recovered.id);
+          setState(prev => ({
+            ...prev,
+            studentName: recovered.name,
+            wordBank: [],
+            dailyWordIds: []
+          }));
+          setStudentEnteredName(true);
+        } else {
+          setState(prev => ({
+            ...prev,
+            studentName: name.trim(),
+            wordBank: [],
+            dailyWordIds: []
+          }));
+          setCurrentStudentId(null);
+          setStudentEnteredName(true);
+        }
+      } catch {
+        setState(prev => ({
+          ...prev,
+          studentName: name.trim(),
+          wordBank: [],
+          dailyWordIds: []
+        }));
+        setCurrentStudentId(null);
+        setStudentEnteredName(true);
+      }
     } finally {
       setLoadingStudent(false);
     }
@@ -496,6 +533,7 @@ const App: React.FC = () => {
           ) : (
             <StudentDashboard 
               studentId={currentStudentId}
+              assignmentRefreshTick={assignmentRefreshTick}
               name={state.studentName} 
               wordBank={state.wordBank}
               dailyWordIds={state.dailyWordIds}

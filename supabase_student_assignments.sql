@@ -30,3 +30,8 @@ CREATE POLICY "Student assignments anon update"
     ON vocab_student_assignments FOR UPDATE USING (true);
 CREATE POLICY "Student assignments anon delete"
     ON vocab_student_assignments FOR DELETE USING (true);
+
+-- Live updates on the student dashboard: enable replication for this table.
+-- In Supabase: Database → Publications → supabase_realtime → add `vocab_student_assignments`,
+-- or run (ignore error if already added):
+--   ALTER PUBLICATION supabase_realtime ADD TABLE public.vocab_student_assignments;
