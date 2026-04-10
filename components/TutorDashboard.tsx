@@ -5,6 +5,18 @@ import { generateWordExplanation, extractVocabularyFromFile, generateDailySpelli
 import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests, getStudentProgress, getStudentPracticeHistoryByDate, assignWordsToDailyQuest, getTodayLondonDate } from '../lib/supabaseQueries';
 import { formatWordForDisplay } from '../lib/wordDisplay';
 import { VocabWord } from '../lib/supabase';
+import { vocabWordToWordEntry } from '../lib/vocabWordEntry';
+import {
+  GRAMMAR_TAGS,
+  WRITING_TAGS,
+  SEMANTIC_TAGS,
+  PART_OF_SPEECH_VALUES,
+  humanizeCurriculumLabel,
+  normalizePartOfSpeechForSave,
+  normalizeTagArrayForSave,
+  tagsPresentInWordBank,
+} from '../lib/vocabTaxonomy';
+import WritingExercisesModal from './WritingExercisesModal';
 
 interface TutorDashboardProps {
   studentName: string;
@@ -13,30 +25,15 @@ interface TutorDashboardProps {
   dailyWordIds: string[];
   allStudents: { id: string; name: string }[];
   onBulkAssignDailyQuest: (studentIds: string[], wordIds: string[]) => Promise<void>;
+  /** Replace the full daily quest word-id list (used for bulk select on page). */
+  onReplaceDailyQuest: (wordIds: string[]) => Promise<void>;
   onUpdateWords: (newWords: WordEntry[]) => void;
   onToggleDaily: (id: string) => void;
   onRefetchDailyQuest?: () => Promise<void>;
   onBack: () => void;
 }
 
-// Helper function to convert VocabWord to WordEntry
-const convertVocabWordToWordEntry = (vocabWord: VocabWord): WordEntry => {
-  return {
-    id: vocabWord.id,
-    word: vocabWord.word,
-    definition: vocabWord.definition,
-    root: vocabWord.root,
-    origin: vocabWord.origin,
-    wordFamily: vocabWord.word_family || undefined,
-    synonyms: vocabWord.synonyms || [],
-    antonyms: vocabWord.antonyms || [],
-    example: vocabWord.example,
-    yearGroup: vocabWord.year_group,
-    learningPoint: vocabWord.learning_point
-  };
-};
-
-const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId, wordBank, dailyWordIds, allStudents, onBulkAssignDailyQuest, onUpdateWords, onToggleDaily, onRefetchDailyQuest, onBack }) => {
+const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId, wordBank, dailyWordIds, allStudents, onBulkAssignDailyQuest, onReplaceDailyQuest, onUpdateWords, onToggleDaily, onRefetchDailyQuest, onBack }) => {
   const [newWord, setNewWord] = useState('');
   const [loading, setLoading] = useState(false);
   const [showBulkAssignModal, setShowBulkAssignModal] = useState(false);
@@ -54,9 +51,15 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const [filterYearGroup, setFilterYearGroup] = useState<string>('all');
   const [filterLearningPoint, setFilterLearningPoint] = useState<string>('all');
   const [filterWordFamily, setFilterWordFamily] = useState<string>('all');
+  const [filterGrammar, setFilterGrammar] = useState<string>('all');
+  const [filterWriting, setFilterWriting] = useState<string>('all');
+  const [filterSemantic, setFilterSemantic] = useState<string>('all');
   const [filterPinnedOnly, setFilterPinnedOnly] = useState<boolean>(false);
   const [filterSearch, setFilterSearch] = useState<string>('');
   const [wordBankPage, setWordBankPage] = useState(1);
+  const [selectedExerciseWordIds, setSelectedExerciseWordIds] = useState<Set<string>>(new Set());
+  const [writingExercisesOpen, setWritingExercisesOpen] = useState(false);
+  const [dailyBulkReplacing, setDailyBulkReplacing] = useState(false);
   const [editingWord, setEditingWord] = useState<WordEntry | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<WordEntry>>({});
   // Past daily quests
@@ -82,7 +85,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
       try {
         setLoadingWords(true);
         const vocabWords = await getAllWords();
-        const wordEntries = vocabWords.map(convertVocabWordToWordEntry);
+        const wordEntries = vocabWords.map(vocabWordToWordEntry);
         onUpdateWords(wordEntries);
       } catch (err: any) {
         console.error('Failed to load words from Supabase:', err);
@@ -212,7 +215,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
 
         // Reload words from Supabase so word bank includes the new word
         const vocabWords = await getAllWords();
-        const wordEntries = vocabWords.map(convertVocabWordToWordEntry);
+        const wordEntries = vocabWords.map(vocabWordToWordEntry);
         onUpdateWords(wordEntries);
 
         // Pin to daily quest using the ID from the insert response (reliable)
@@ -354,7 +357,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                 }
               }
               const vocabWords = await getAllWords();
-              const wordEntries = vocabWords.map(convertVocabWordToWordEntry);
+              const wordEntries = vocabWords.map(vocabWordToWordEntry);
               onUpdateWords(wordEntries);
               if (addToDailyByDefault && addedWordIds.length > 0) {
                 try {
@@ -415,7 +418,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
       await deleteWordFromSupabase(id);
       // Reload words from Supabase
       const vocabWords = await getAllWords();
-      const wordEntries = vocabWords.map(convertVocabWordToWordEntry);
+      const wordEntries = vocabWords.map(vocabWordToWordEntry);
       onUpdateWords(wordEntries);
     } catch (error) {
       console.error('Failed to delete word from Supabase:', error);
@@ -432,6 +435,10 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
       definition: word.definition,
       root: word.root || '',
       origin: word.origin || '',
+      partOfSpeech: word.partOfSpeech || '',
+      grammar: [...(word.grammar || [])],
+      writing: [...(word.writing || [])],
+      semantic: [...(word.semantic || [])],
       synonyms: word.synonyms || [],
       antonyms: word.antonyms || [],
       example: word.example,
@@ -447,6 +454,16 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
 
   const handleEditFieldChange = (field: keyof WordEntry, value: any) => {
     setEditFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const toggleCurriculumTag = (field: 'grammar' | 'writing' | 'semantic', tag: string) => {
+    setEditFormData(prev => {
+      const cur = [...(prev[field] as string[] | undefined) || []];
+      const i = cur.indexOf(tag);
+      if (i >= 0) cur.splice(i, 1);
+      else cur.push(tag);
+      return { ...prev, [field]: cur };
+    });
   };
 
   const handleEditArrayFieldChange = (field: 'synonyms' | 'antonyms', index: number, value: string) => {
@@ -484,6 +501,10 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
         definition: editFormData.definition || '',
         root: editFormData.root || '',
         origin: editFormData.origin || '',
+        part_of_speech: normalizePartOfSpeechForSave(editFormData.partOfSpeech),
+        grammar: normalizeTagArrayForSave(editFormData.grammar as string[] | undefined, GRAMMAR_TAGS),
+        writing: normalizeTagArrayForSave(editFormData.writing as string[] | undefined, WRITING_TAGS),
+        semantic: normalizeTagArrayForSave(editFormData.semantic as string[] | undefined, SEMANTIC_TAGS),
         synonyms: editFormData.synonyms || [],
         antonyms: editFormData.antonyms || [],
         example: editFormData.example || '',
@@ -493,7 +514,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
       
       // Reload words from Supabase
       const vocabWords = await getAllWords();
-      const wordEntries = vocabWords.map(convertVocabWordToWordEntry);
+      const wordEntries = vocabWords.map(vocabWordToWordEntry);
       onUpdateWords(wordEntries);
       
       setEditingWord(null);
@@ -536,7 +557,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
       if (Object.keys(updates).length === 0) return;
       await updateWordInSupabase(w.id, updates);
       const vocabWords = await getAllWords();
-      const wordEntries = vocabWords.map(convertVocabWordToWordEntry);
+      const wordEntries = vocabWords.map(vocabWordToWordEntry);
       onUpdateWords(wordEntries);
     } catch (err: any) {
       console.error('Enrich word failed:', err);
@@ -576,7 +597,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
         }
         done++;
         const vocabWords = await getAllWords();
-        const wordEntries = vocabWords.map(convertVocabWordToWordEntry);
+        const wordEntries = vocabWords.map(vocabWordToWordEntry);
         onUpdateWords(wordEntries);
       } catch (err: any) {
         console.error('Enrich word failed:', w.word, err);
@@ -597,6 +618,9 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const uniqueWordFamilies = Array.from(
     new Set(wordBank.map(w => w.wordFamily).filter((wf): wf is string => !!wf && wf.trim().length > 0))
   ).sort();
+  const uniqueGrammars = tagsPresentInWordBank(wordBank, 'grammar', GRAMMAR_TAGS);
+  const uniqueWritings = tagsPresentInWordBank(wordBank, 'writing', WRITING_TAGS);
+  const uniqueSemantics = tagsPresentInWordBank(wordBank, 'semantic', SEMANTIC_TAGS);
 
   // Filter words based on selected criteria
   const filteredWords = wordBank.filter(word => {
@@ -618,8 +642,18 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
     if (filterWordFamily !== 'all' && word.wordFamily !== filterWordFamily) {
       return false;
     }
+
+    if (filterGrammar !== 'all' && !word.grammar?.includes(filterGrammar)) {
+      return false;
+    }
+    if (filterWriting !== 'all' && !word.writing?.includes(filterWriting)) {
+      return false;
+    }
+    if (filterSemantic !== 'all' && !word.semantic?.includes(filterSemantic)) {
+      return false;
+    }
     
-    // Search filter (searches word, definition, learning point, root, word family)
+    // Search filter (searches word, definition, learning point, root, word family, tags)
     if (filterSearch.trim()) {
       const searchLower = filterSearch.toLowerCase();
       const matchesWord = word.word.toLowerCase().includes(searchLower);
@@ -627,8 +661,25 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
       const matchesLearningPoint = word.learningPoint.toLowerCase().includes(searchLower);
       const matchesRoot = word.root?.toLowerCase().includes(searchLower);
       const matchesWordFamily = word.wordFamily?.toLowerCase().includes(searchLower);
+      const matchesPos = word.partOfSpeech?.toLowerCase().includes(searchLower);
+      const grammarBlob = (word.grammar || []).join(' ').toLowerCase();
+      const writingBlob = (word.writing || []).join(' ').toLowerCase();
+      const semanticBlob = (word.semantic || []).join(' ').toLowerCase();
+      const matchesGrammar = grammarBlob.includes(searchLower);
+      const matchesWriting = writingBlob.includes(searchLower);
+      const matchesSemantic = semanticBlob.includes(searchLower);
       
-      if (!matchesWord && !matchesDefinition && !matchesLearningPoint && !matchesRoot && !matchesWordFamily) {
+      if (
+        !matchesWord &&
+        !matchesDefinition &&
+        !matchesLearningPoint &&
+        !matchesRoot &&
+        !matchesWordFamily &&
+        !matchesPos &&
+        !matchesGrammar &&
+        !matchesWriting &&
+        !matchesSemantic
+      ) {
         return false;
       }
     }
@@ -640,6 +691,9 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
     setFilterYearGroup('all');
     setFilterLearningPoint('all');
     setFilterWordFamily('all');
+    setFilterGrammar('all');
+    setFilterWriting('all');
+    setFilterSemantic('all');
     setFilterPinnedOnly(false);
     setFilterSearch('');
   };
@@ -651,10 +705,51 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
     (wordBankPage - 1) * WORDS_PER_PAGE + WORDS_PER_PAGE
   );
 
+  const toggleExerciseWordSelection = (id: string) => {
+    setSelectedExerciseWordIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAllExerciseWordsOnPage = () => {
+    const ids = paginatedWords.map(w => w.id);
+    setSelectedExerciseWordIds(prev => {
+      const next = new Set(prev);
+      const allOn = ids.length > 0 && ids.every(id => next.has(id));
+      if (allOn) ids.forEach(id => next.delete(id));
+      else ids.forEach(id => next.add(id));
+      return next;
+    });
+  };
+
+  const selectedWordsForExercises = wordBank.filter(w => selectedExerciseWordIds.has(w.id));
+  const allPageExerciseSelected =
+    paginatedWords.length > 0 && paginatedWords.every(w => selectedExerciseWordIds.has(w.id));
+  const allPageDailySelected =
+    paginatedWords.length > 0 && paginatedWords.every(w => dailyWordIds.includes(w.id));
+
+  const toggleSelectAllDailyOnPage = async () => {
+    if (paginatedWords.length === 0) return;
+    const pageIds = paginatedWords.map(w => w.id);
+    const next = new Set(dailyWordIds);
+    const allOn = pageIds.every(id => next.has(id));
+    if (allOn) pageIds.forEach(id => next.delete(id));
+    else pageIds.forEach(id => next.add(id));
+    setDailyBulkReplacing(true);
+    try {
+      await onReplaceDailyQuest([...next]);
+    } finally {
+      setDailyBulkReplacing(false);
+    }
+  };
+
   // Reset to page 1 when filters change
   useEffect(() => {
     setWordBankPage(1);
-  }, [filterYearGroup, filterLearningPoint, filterWordFamily, filterPinnedOnly, filterSearch]);
+  }, [filterYearGroup, filterLearningPoint, filterWordFamily, filterGrammar, filterWriting, filterSemantic, filterPinnedOnly, filterSearch]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-4 duration-500 pb-20">
@@ -1107,9 +1202,9 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                      ? 'bg-amber-500 border-amber-600 text-white'
                      : 'bg-amber-100 border-amber-200 text-amber-700 hover:bg-amber-200'
                  }`}
-                 title="Click to show only words that are pinned to today's quest"
+                 title="Show only words included in this student’s daily quest"
                >
-                 {dailyWordIds.length} Pin to Quest{filterPinnedOnly ? ' · Showing pinned only' : ''}
+                 {dailyWordIds.length} in daily quest{filterPinnedOnly ? ' · filtered' : ''}
                </button>
                {wordBank.some(needsEnriching) && (
                  <button
@@ -1131,8 +1226,48 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                    )}
                  </button>
                )}
+               <button
+                 type="button"
+                 onClick={() => setWritingExercisesOpen(true)}
+                 disabled={selectedExerciseWordIds.size === 0}
+                 className="bg-teal-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-sm hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                 title="Generate printable writing tasks from ticked words"
+               >
+                 📝 Writing exercises
+                 {selectedExerciseWordIds.size > 0 && (
+                   <span className="bg-white/20 px-2 py-0.5 rounded-lg">{selectedExerciseWordIds.size}</span>
+                 )}
+               </button>
             </div>
           </div>
+          <p className="text-xs text-gray-600 font-medium mb-3 leading-relaxed">
+            <span className="font-black text-amber-800">Daily quest</span> (amber checkboxes) and{' '}
+            <span className="font-black text-teal-800">writing exercises</span> (teal checkboxes) are{' '}
+            <span className="font-black text-gray-800">independent</span>—pick different words for each.
+          </p>
+          {(dailyWordIds.length > 0 || selectedExerciseWordIds.size > 0) && (
+            <p className="text-xs font-bold text-gray-800 mb-3">
+              {dailyWordIds.length > 0 && (
+                <span className="text-amber-900">
+                  {dailyWordIds.length} word{dailyWordIds.length !== 1 ? 's' : ''} in daily quest
+                </span>
+              )}
+              {dailyWordIds.length > 0 && selectedExerciseWordIds.size > 0 && <span className="text-gray-400 mx-2">·</span>}
+              {selectedExerciseWordIds.size > 0 && (
+                <span className="text-teal-900">
+                  {selectedExerciseWordIds.size} word{selectedExerciseWordIds.size !== 1 ? 's' : ''} for writing exercises
+                  {' · '}
+                  <button
+                    type="button"
+                    className="underline hover:text-teal-950 font-black"
+                    onClick={() => setSelectedExerciseWordIds(new Set())}
+                  >
+                    Clear writing selection
+                  </button>
+                </span>
+              )}
+            </p>
+          )}
 
           {/* Filter Controls */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -1142,7 +1277,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                 type="text"
                 value={filterSearch}
                 onChange={(e) => setFilterSearch(e.target.value)}
-                placeholder="Search words, definitions, or patterns..."
+                placeholder="Search words, definitions, grammar, semantic…"
                 className="w-full bg-white border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-medium text-sm text-gray-900"
               />
             </div>
@@ -1184,7 +1319,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                 ))}
               </select>
               
-              {(filterYearGroup !== 'all' || filterLearningPoint !== 'all' || filterWordFamily !== 'all' || filterPinnedOnly || filterSearch.trim()) && (
+              {(filterYearGroup !== 'all' || filterLearningPoint !== 'all' || filterWordFamily !== 'all' || filterGrammar !== 'all' || filterWriting !== 'all' || filterSemantic !== 'all' || filterPinnedOnly || filterSearch.trim()) && (
                 <button
                   onClick={clearFilters}
                   className="bg-gray-200 text-gray-700 px-4 py-2.5 rounded-xl font-bold hover:bg-gray-300 transition-all text-sm"
@@ -1195,16 +1330,78 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
               )}
             </div>
           </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+            <select
+              value={filterGrammar}
+              onChange={(e) => setFilterGrammar(e.target.value)}
+              className="bg-white border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-bold text-sm text-gray-900 cursor-pointer"
+            >
+              <option value="all">All grammar</option>
+              {uniqueGrammars.map(g => (
+                <option key={g} value={g}>{humanizeCurriculumLabel(g)}</option>
+              ))}
+            </select>
+            <select
+              value={filterWriting}
+              onChange={(e) => setFilterWriting(e.target.value)}
+              className="bg-white border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-bold text-sm text-gray-900 cursor-pointer"
+            >
+              <option value="all">All writing</option>
+              {uniqueWritings.map(x => (
+                <option key={x} value={x}>{humanizeCurriculumLabel(x)}</option>
+              ))}
+            </select>
+            <select
+              value={filterSemantic}
+              onChange={(e) => setFilterSemantic(e.target.value)}
+              className="bg-white border-2 border-gray-200 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all font-bold text-sm text-gray-900 cursor-pointer"
+            >
+              <option value="all">All semantic</option>
+              {uniqueSemantics.map(s => (
+                <option key={s} value={s}>{humanizeCurriculumLabel(s)}</option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
             <thead className="bg-gray-50/50 text-gray-400 text-[10px] uppercase font-black border-b tracking-widest">
               <tr>
-                <th className="px-8 py-5">Word</th>
-                <th className="px-8 py-5">Daily Quest Status</th>
-                <th className="px-8 py-5">Year Group</th>
-                <th className="px-8 py-5">Learning Point</th>
-                <th className="px-8 py-5 text-right">Actions</th>
+                <th className="pl-4 pr-1 py-5 w-[4.5rem] text-center align-bottom" title="Words in the student’s daily quest (flashcards / quiz)">
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span className="text-[9px] font-black text-amber-700 tracking-tight leading-tight normal-case">Daily</span>
+                    <input
+                      type="checkbox"
+                      checked={allPageDailySelected}
+                      onChange={() => { void toggleSelectAllDailyOnPage(); }}
+                      disabled={paginatedWords.length === 0 || dailyBulkReplacing}
+                      className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                      aria-label="Select all words on this page for daily quest"
+                    />
+                  </div>
+                </th>
+                <th className="pr-1 py-5 w-[4.5rem] text-center align-bottom" title="Words used when you open Writing exercises">
+                  <div className="flex flex-col items-center gap-1.5">
+                    <span className="text-[9px] font-black text-teal-700 tracking-tight leading-tight normal-case">Writing</span>
+                    <input
+                      type="checkbox"
+                      checked={allPageExerciseSelected}
+                      onChange={toggleSelectAllExerciseWordsOnPage}
+                      disabled={paginatedWords.length === 0}
+                      className="w-4 h-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
+                      aria-label="Select all words on this page for writing exercises"
+                    />
+                  </div>
+                </th>
+                <th className="px-6 py-5 min-w-[140px]">Word</th>
+                <th className="px-4 py-5 whitespace-nowrap">Year</th>
+                <th className="px-4 py-5 min-w-[100px]">Learning Point</th>
+                <th className="px-4 py-5 min-w-[80px]">PoS</th>
+                <th className="px-4 py-5 min-w-[90px]">Grammar</th>
+                <th className="px-4 py-5 min-w-[90px]">Writing</th>
+                <th className="px-4 py-5 min-w-[90px]">Semantic</th>
+                <th className="px-6 py-5 text-right whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -1212,7 +1409,26 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                 const isDaily = dailyWordIds.includes(w.id);
                 return (
                   <tr key={w.id} className={`transition-colors group text-sm ${isDaily ? 'bg-amber-50/30' : 'hover:bg-indigo-50/30'}`}>
-                    <td className="px-8 py-5">
+                    <td className="pl-4 pr-1 py-5 align-top text-center">
+                      <input
+                        type="checkbox"
+                        checked={isDaily}
+                        onChange={() => onToggleDaily(w.id)}
+                        disabled={dailyBulkReplacing}
+                        className="w-4 h-4 rounded border-gray-300 text-amber-600 focus:ring-amber-500 cursor-pointer mt-1"
+                        aria-label={`Include ${w.word} in daily quest`}
+                      />
+                    </td>
+                    <td className="pr-1 py-5 align-top text-center">
+                      <input
+                        type="checkbox"
+                        checked={selectedExerciseWordIds.has(w.id)}
+                        onChange={() => toggleExerciseWordSelection(w.id)}
+                        className="w-4 h-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500 cursor-pointer mt-1"
+                        aria-label={`Select ${w.word} for writing exercises`}
+                      />
+                    </td>
+                    <td className="px-6 py-5">
                       <div className="font-black text-gray-900 text-lg">{formatWordForDisplay(w.word)}</div>
                       {w.wordFamily && (
                         <div className="mt-1">
@@ -1224,28 +1440,62 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                       )}
                     </td>
                     <td className="px-8 py-5">
-                      <button 
-                        onClick={() => onToggleDaily(w.id)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-xl font-black text-[10px] uppercase transition-all shadow-sm ${
-                          isDaily 
-                          ? 'bg-amber-400 text-white border-b-4 border-amber-600' 
-                          : 'bg-white text-gray-400 border border-gray-200 hover:border-amber-300 hover:text-amber-600'
-                        }`}
-                      >
-                        {isDaily ? '⭐ PINNED' : '☆ PIN TO DAILY'}
-                      </button>
-                    </td>
-                    <td className="px-8 py-5">
                       <span className="bg-white border-2 px-3 py-1.5 rounded-xl text-[10px] font-black text-gray-700 uppercase shadow-sm">
                         {w.yearGroup}
                       </span>
                     </td>
-                    <td className="px-8 py-5">
-                      <span className="text-indigo-600 font-black bg-indigo-50 px-3 py-1.5 rounded-xl text-[10px] uppercase tracking-wider">
+                    <td className="px-4 py-5 align-top">
+                      <span className="text-indigo-600 font-black bg-indigo-50 px-3 py-1.5 rounded-xl text-[10px] uppercase tracking-wider inline-block max-w-[200px] break-words">
                         {w.learningPoint}
                       </span>
                     </td>
-                    <td className="px-8 py-5 text-right">
+                    <td className="px-4 py-5 align-top text-xs text-gray-700 max-w-[120px]">
+                      {w.partOfSpeech ? (
+                        <span className="font-bold bg-slate-100 px-2 py-1 rounded-lg">{humanizeCurriculumLabel(w.partOfSpeech)}</span>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-5 align-top text-xs text-gray-700 max-w-[160px]">
+                      {w.grammar && w.grammar.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {w.grammar.map(t => (
+                            <span key={t} className="font-semibold text-teal-800 bg-teal-50 px-2 py-0.5 rounded-lg text-[10px] leading-tight">
+                              {humanizeCurriculumLabel(t)}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-5 align-top text-xs text-gray-700 max-w-[160px]">
+                      {w.writing && w.writing.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {w.writing.map(t => (
+                            <span key={t} className="font-semibold text-violet-800 bg-violet-50 px-2 py-0.5 rounded-lg text-[10px] leading-tight">
+                              {humanizeCurriculumLabel(t)}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-5 align-top text-xs text-gray-700 max-w-[160px]">
+                      {w.semantic && w.semantic.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {w.semantic.map(t => (
+                            <span key={t} className="font-semibold text-rose-800 bg-rose-50 px-2 py-0.5 rounded-lg text-[10px] leading-tight">
+                              {humanizeCurriculumLabel(t)}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-gray-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-5 text-right">
                       <div className="flex items-center justify-end gap-2">
                         {needsEnriching(w) && (
                           <button
@@ -1423,6 +1673,88 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                 </div>
               </div>
 
+              {/* Part of speech (single choice) */}
+              <div>
+                <label className="block text-sm font-black text-gray-700 mb-2 uppercase tracking-wide">Part of speech</label>
+                <p className="text-xs text-gray-500 mb-2">Choose one value only.</p>
+                <select
+                  value={editFormData.partOfSpeech || ''}
+                  onChange={(e) => handleEditFieldChange('partOfSpeech', e.target.value || undefined)}
+                  className="w-full bg-gray-50 border-2 border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-medium text-gray-900 cursor-pointer"
+                >
+                  <option value="">— None —</option>
+                  {PART_OF_SPEECH_VALUES.map(pos => (
+                    <option key={pos} value={pos}>{humanizeCurriculumLabel(pos)}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Grammar tags (TEXT[] — multiple allowed) */}
+              <div>
+                <label className="block text-sm font-black text-gray-700 mb-1 uppercase tracking-wide">Grammar tags</label>
+                <p className="text-xs text-gray-500 mb-2">Select any that apply (saved as a text array).</p>
+                <div className="max-h-44 overflow-y-auto border-2 border-gray-200 rounded-xl p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 bg-gray-50/50">
+                  {GRAMMAR_TAGS.map(tag => {
+                    const checked = (editFormData.grammar as string[] | undefined)?.includes(tag) ?? false;
+                    return (
+                      <label key={tag} className="flex items-start gap-2 text-sm cursor-pointer text-gray-800">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleCurriculumTag('grammar', tag)}
+                          className="mt-1 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>{humanizeCurriculumLabel(tag)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Writing tags */}
+              <div>
+                <label className="block text-sm font-black text-gray-700 mb-1 uppercase tracking-wide">Writing tags</label>
+                <p className="text-xs text-gray-500 mb-2">Select any that apply.</p>
+                <div className="max-h-44 overflow-y-auto border-2 border-gray-200 rounded-xl p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 bg-gray-50/50">
+                  {WRITING_TAGS.map(tag => {
+                    const checked = (editFormData.writing as string[] | undefined)?.includes(tag) ?? false;
+                    return (
+                      <label key={tag} className="flex items-start gap-2 text-sm cursor-pointer text-gray-800">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleCurriculumTag('writing', tag)}
+                          className="mt-1 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>{humanizeCurriculumLabel(tag)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Semantic tags */}
+              <div>
+                <label className="block text-sm font-black text-gray-700 mb-1 uppercase tracking-wide">Semantic tags</label>
+                <p className="text-xs text-gray-500 mb-2">Select any that apply.</p>
+                <div className="max-h-44 overflow-y-auto border-2 border-gray-200 rounded-xl p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 bg-gray-50/50">
+                  {SEMANTIC_TAGS.map(tag => {
+                    const checked = (editFormData.semantic as string[] | undefined)?.includes(tag) ?? false;
+                    return (
+                      <label key={tag} className="flex items-start gap-2 text-sm cursor-pointer text-gray-800">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleCurriculumTag('semantic', tag)}
+                          className="mt-1 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        <span>{humanizeCurriculumLabel(tag)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
               {/* Example */}
               <div>
                 <label className="block text-sm font-black text-gray-700 mb-2 uppercase tracking-wide">Example Sentence</label>
@@ -1513,6 +1845,14 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
           </div>
         </div>
       )}
+
+      <WritingExercisesModal
+        open={writingExercisesOpen}
+        onClose={() => setWritingExercisesOpen(false)}
+        selectedWords={selectedWordsForExercises}
+        assignStudentId={studentId}
+        assignStudentName={studentName}
+      />
     </div>
   );
 };

@@ -1,6 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { WordEntry, YearGroup } from "./types";
+import { WRITING_EXERCISE_TYPES, WRITING_EXERCISE_TYPE_IDS } from "./lib/writingExerciseTypes";
 
 const apiKey = typeof process !== 'undefined' ? (process.env.API_KEY || '') : '';
 // Only create the client when we have a key (SDK throws if key is empty)
@@ -253,6 +254,132 @@ export const extractVocabularyFromFile = async (base64Data: string, mimeType: st
     }
     throw new Error(`Failed to extract words: ${error.toString()}`);
   }
+};
+
+export interface GeneratedWritingExerciseItem {
+  exerciseType: string;
+  title: string;
+  studentInstructions: string;
+  mainContent: string;
+  options: string[];
+  answerKey: string;
+  teacherNotes: string;
+}
+
+const MAX_WORDS_FOR_WRITING_EXERCISES = 12;
+
+/**
+ * Generate teacher-ready writing exercises anchored on selected vocabulary.
+ */
+export const generateWritingExercises = async (
+  words: Pick<WordEntry, "word" | "definition" | "example" | "yearGroup">[],
+  exerciseTypeIds: string[]
+): Promise<GeneratedWritingExerciseItem[]> => {
+  const trimmedWords = words.slice(0, MAX_WORDS_FOR_WRITING_EXERCISES);
+  if (trimmedWords.length === 0) {
+    throw new Error("Select at least one word from the word bank.");
+  }
+  const ids = [...new Set(exerciseTypeIds)].filter(id => WRITING_EXERCISE_TYPE_IDS.includes(id as (typeof WRITING_EXERCISE_TYPE_IDS)[number]));
+  if (ids.length === 0) {
+    throw new Error("Choose at least one exercise type.");
+  }
+
+  const typeLines = ids
+    .map(id => {
+      const m = WRITING_EXERCISE_TYPES.find(t => t.id === id);
+      return m ? `- ${id}: ${m.description}` : `- ${id}`;
+    })
+    .join("\n");
+
+  const wordBlock = trimmedWords
+    .map(w => {
+      const ex = (w.example || "").trim();
+      const exShort = ex.length > 160 ? `${ex.slice(0, 157)}…` : ex;
+      return `• ${w.word} (${w.yearGroup}): ${w.definition}${exShort ? ` Example from bank: ${exShort}` : ""}`;
+    })
+    .join("\n");
+
+  const orderedIds = ids.join(", ");
+
+  const prompt = `You create printable writing tasks for UK primary school pupils (ages 7–11).
+
+TARGET VOCABULARY (use these words naturally; do not define them in the pupil-facing text unless the task requires it):
+${wordBlock}
+
+You must output EXACTLY ${ids.length} exercises, ONE for each type below, IN THIS ORDER: ${orderedIds}
+
+For each exercise type, follow the brief:
+${typeLines}
+
+Rules:
+- Language: British English. Clear, child-friendly instructions.
+- Each exercise must clearly relate to at least one target word (in the stimulus, options, or expected improvement), except "cut the ramble" and "show-not-tell" may use a general topic while still mentioning one target word in the teacher notes if possible.
+- mainContent is what appears on the worksheet (sentences, bullet steps, numbered layers, etc.). Use plain text with line breaks; no markdown headings.
+- For multiple-choice style tasks, put the choices in "options" (3–5 strings). For others, use an empty array for options.
+- answerKey: short correct answer or model response for the teacher.
+- teacherNotes: one line tip for teaching or differentiation.
+
+Return a JSON array only. Each item's "exerciseType" must be exactly one of: ${orderedIds}`;
+
+  if (!apiKey || !ai) {
+    return callGeminiServer<GeneratedWritingExerciseItem[]>("writingExercises", {
+      words: trimmedWords,
+      exerciseTypeIds: ids,
+    });
+  }
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            exerciseType: {
+              type: Type.STRING,
+              enum: [...WRITING_EXERCISE_TYPE_IDS],
+            },
+            title: { type: Type.STRING },
+            studentInstructions: { type: Type.STRING },
+            mainContent: { type: Type.STRING },
+            options: { type: Type.ARRAY, items: { type: Type.STRING } },
+            answerKey: { type: Type.STRING },
+            teacherNotes: { type: Type.STRING },
+          },
+          required: [
+            "exerciseType",
+            "title",
+            "studentInstructions",
+            "mainContent",
+            "options",
+            "answerKey",
+            "teacherNotes",
+          ],
+        },
+      },
+    },
+  });
+
+  const raw = JSON.parse(response.text || "[]") as GeneratedWritingExerciseItem[];
+  if (!Array.isArray(raw)) {
+    throw new Error("Invalid response from writing exercise generator.");
+  }
+
+  const byId = new Map(raw.map(item => [item.exerciseType, item]));
+  const ordered: GeneratedWritingExerciseItem[] = [];
+  for (const id of ids) {
+    const item = byId.get(id);
+    if (item) ordered.push(item);
+  }
+  if (ordered.length < ids.length) {
+    throw new Error(
+      `The AI returned ${ordered.length} of ${ids.length} exercises. Try generating again.`
+    );
+  }
+  return ordered;
 };
 
 export const generateQuizQuestions = async (words: string[]) => {

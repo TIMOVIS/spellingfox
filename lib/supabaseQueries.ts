@@ -1,4 +1,4 @@
-import { supabase, VocabWord, VocabStudent, VocabStudentProgress, VocabDailyQuest, VocabPracticeRecord } from './supabase';
+import { supabase, VocabWord, VocabStudent, VocabStudentProgress, VocabDailyQuest, VocabPracticeRecord, VocabStudentAssignment } from './supabase';
 
 /** App timezone: London (Europe/London). */
 const LONDON_TIMEZONE = 'Europe/London';
@@ -408,4 +408,54 @@ export const getStudentPracticeHistoryByDate = async (
   }
   const sortedDates = [...byDate.keys()].sort((a, b) => b.localeCompare(a)).slice(0, limitDays);
   return sortedDates.map(date => ({ date, records: byDate.get(date)! }));
+};
+
+// ============================================
+// TEACHER-ASSIGNED EXERCISES (per student)
+// ============================================
+
+export const getStudentAssignments = async (studentId: string): Promise<VocabStudentAssignment[]> => {
+  const { data, error } = await supabase
+    .from('vocab_student_assignments')
+    .select('*')
+    .eq('student_id', studentId)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data || []) as VocabStudentAssignment[];
+};
+
+export interface NewStudentAssignmentRow {
+  exercise_type?: string | null;
+  title: string;
+  student_instructions: string;
+  main_content: string;
+  options?: string[];
+  sort_order?: number;
+}
+
+export const insertStudentAssignments = async (
+  studentId: string,
+  items: NewStudentAssignmentRow[]
+): Promise<void> => {
+  if (items.length === 0) return;
+  const rows = items.map((item, i) => ({
+    student_id: studentId,
+    exercise_type: item.exercise_type ?? null,
+    title: item.title,
+    student_instructions: item.student_instructions,
+    main_content: item.main_content,
+    options: item.options ?? [],
+    sort_order: item.sort_order ?? i,
+  }));
+  const { error } = await supabase.from('vocab_student_assignments').insert(rows);
+  if (error) throw error;
+};
+
+export const markStudentAssignmentComplete = async (assignmentId: string): Promise<void> => {
+  const { error } = await supabase
+    .from('vocab_student_assignments')
+    .update({ completed_at: new Date().toISOString() })
+    .eq('id', assignmentId);
+  if (error) throw error;
 };

@@ -30,6 +30,13 @@ CREATE TABLE vocab_words (
     synonyms TEXT[] DEFAULT '{}',
     antonyms TEXT[] DEFAULT '{}',
     example TEXT NOT NULL, -- Example sentence from children's literature
+
+    -- Optional curriculum tags (see supabase_vocab_curriculum_columns.sql, lib/vocabTaxonomy.ts)
+    -- word_family TEXT,
+    -- part_of_speech TEXT,  -- single value: noun, verb, adjective, …
+    -- grammar TEXT[],       -- e.g. {irregular_plural,homophone}
+    -- writing TEXT[],
+    -- semantic TEXT[],
     
     -- Metadata
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

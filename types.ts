@@ -11,6 +11,12 @@ export interface WordEntry {
   origin?: string;
   /** Optional semantic/word family label, e.g. "walk family" */
   wordFamily?: string;
+  /** Single value: noun | verb | adjective | adverb | pronoun | conjunction | preposition | determiner | interjection */
+  partOfSpeech?: string;
+  /** Allowed tags only; see lib/vocabTaxonomy.ts (grammar TEXT[] in DB) */
+  grammar?: string[];
+  writing?: string[];
+  semantic?: string[];
   synonyms: string[];
   antonyms: string[];
   example: string;

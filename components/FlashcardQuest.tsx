@@ -8,9 +8,10 @@ interface FlashcardQuestProps {
   word: WordEntry;
   onClose: () => void;
   onStartQuiz: (word: WordEntry) => void;
-  onStartSpelling: (word: WordEntry) => void;
-  onStartDisappearingLetters: (word: WordEntry) => void;
-  onStartSpellingBee: (word: WordEntry) => void;
+  /** Optional extra games after the flashcard (hidden if not provided). */
+  onStartSpelling?: (word: WordEntry) => void;
+  onStartDisappearingLetters?: (word: WordEntry) => void;
+  onStartSpellingBee?: (word: WordEntry) => void;
   /** Called when the user closes after viewing (so Daily Quest progress can record flashcard practice). */
   onWordViewed?: (word: WordEntry) => void;
 }
@@ -255,24 +256,30 @@ const FlashcardQuest: React.FC<FlashcardQuestProps> = ({ word, onClose, onStartQ
               >
                 <span>🎯</span> TAKE A QUIZ
               </button>
-              <button 
-                onClick={() => onStartSpelling(word)}
-                className="bg-orange-500 text-white px-8 py-4 rounded-[1.5rem] font-black text-xl shadow-lg hover:bg-orange-600 hover:scale-105 transition-all flex items-center justify-center gap-3"
-              >
-                <span>🦊</span> WORD BUILDING
-              </button>
-              <button 
-                onClick={() => onStartDisappearingLetters(word)}
-                className="bg-teal-500 text-white px-8 py-4 rounded-[1.5rem] font-black text-xl shadow-lg hover:bg-teal-600 hover:scale-105 transition-all flex items-center justify-center gap-3"
-              >
-                <span>✨</span> DISAPPEARING LETTERS
-              </button>
-              <button 
-                onClick={() => onStartSpellingBee(word)}
-                className="bg-amber-500 text-white px-8 py-4 rounded-[1.5rem] font-black text-xl shadow-lg hover:bg-amber-600 hover:scale-105 transition-all flex items-center justify-center gap-3"
-              >
-                <span>🐝</span> SPELLING BEE
-              </button>
+              {onStartSpelling && (
+                <button 
+                  onClick={() => onStartSpelling(word)}
+                  className="bg-orange-500 text-white px-8 py-4 rounded-[1.5rem] font-black text-xl shadow-lg hover:bg-orange-600 hover:scale-105 transition-all flex items-center justify-center gap-3"
+                >
+                  <span>🦊</span> WORD BUILDING
+                </button>
+              )}
+              {onStartDisappearingLetters && (
+                <button 
+                  onClick={() => onStartDisappearingLetters(word)}
+                  className="bg-teal-500 text-white px-8 py-4 rounded-[1.5rem] font-black text-xl shadow-lg hover:bg-teal-600 hover:scale-105 transition-all flex items-center justify-center gap-3"
+                >
+                  <span>✨</span> DISAPPEARING LETTERS
+                </button>
+              )}
+              {onStartSpellingBee && (
+                <button 
+                  onClick={() => onStartSpellingBee(word)}
+                  className="bg-amber-500 text-white px-8 py-4 rounded-[1.5rem] font-black text-xl shadow-lg hover:bg-amber-600 hover:scale-105 transition-all flex items-center justify-center gap-3"
+                >
+                  <span>🐝</span> SPELLING BEE
+                </button>
+              )}
             </div>
           </div>
         );

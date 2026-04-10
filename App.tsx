@@ -9,7 +9,8 @@ import Navbar from './components/Navbar';
 import { toggleDailyQuestWord, assignWordsToDailyQuest, addStudent as addStudentToSupabase, deleteStudent as deleteStudentFromSupabase, getAllStudents, getStudentProgress, getDailyQuestWordIds, getStudent, addPointsToStudent, savePracticeRecords } from './lib/supabaseQueries';
 import type { WordPracticeResult, PracticeActivityType } from './lib/supabaseQueries';
 import { getAllWords } from './lib/supabaseQueries';
-import { supabase, VocabWord } from './lib/supabase';
+import { supabase } from './lib/supabase';
+import { vocabWordToWordEntry } from './lib/vocabWordEntry';
 
 const INITIAL_WORD_BANK: WordEntry[] = [
   {
@@ -50,22 +51,7 @@ const INITIAL_WORD_BANK: WordEntry[] = [
   }
 ];
 
-// Helper function to convert VocabWord to WordEntry
-const convertVocabWordToWordEntry = (vocabWord: any): WordEntry => {
-  return {
-    id: vocabWord.id,
-    word: vocabWord.word,
-    definition: vocabWord.definition,
-    root: vocabWord.root,
-    origin: vocabWord.origin,
-    wordFamily: vocabWord.word_family || undefined,
-    synonyms: vocabWord.synonyms || [],
-    antonyms: vocabWord.antonyms || [],
-    example: vocabWord.example,
-    yearGroup: vocabWord.year_group,
-    learningPoint: vocabWord.learning_point
-  };
-};
+const convertVocabWordToWordEntry = vocabWordToWordEntry;
 
 const App: React.FC = () => {
   const [state, setState] = useState<AppState>({
@@ -418,6 +404,26 @@ const App: React.FC = () => {
     }
   };
 
+  /** Replace the selected student's full daily quest list (e.g. bulk select on page). */
+  const replaceDailyQuestForStudent = async (wordIds: string[]) => {
+    const selected = getSelectedStudent();
+    if (!selected) return;
+    const unique = [...new Set(wordIds)];
+    try {
+      await assignWordsToDailyQuest(selected.id, unique);
+      setState(prev => ({
+        ...prev,
+        students: prev.students.map(s =>
+          s.id === selected.id ? { ...s, dailyWordIds: unique } : s
+        )
+      }));
+    } catch (e) {
+      console.error('Failed to replace daily quest:', e);
+      await refetchSelectedStudentDailyQuest();
+      throw e;
+    }
+  };
+
   const toggleDailyWord = async (wordId: string) => {
     const selectedStudent = getSelectedStudent();
     if (!selectedStudent) return;
@@ -519,6 +525,7 @@ const App: React.FC = () => {
             dailyWordIds={getSelectedStudent()?.dailyWordIds || []}
             allStudents={state.students.map(s => ({ id: s.id, name: s.name }))}
             onBulkAssignDailyQuest={bulkAssignDailyQuest}
+            onReplaceDailyQuest={replaceDailyQuestForStudent}
             onUpdateWords={updateWordBank}
             onToggleDaily={toggleDailyWord}
             onRefetchDailyQuest={refetchSelectedStudentDailyQuest}

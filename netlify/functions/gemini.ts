@@ -52,6 +52,15 @@ export const handler = async (event: { httpMethod: string; body: string | null }
         const result = await gemini.generateQuizQuestions(words);
         return { statusCode: 200, headers, body: JSON.stringify(result) };
       }
+      case 'writingExercises': {
+        const words = body.words;
+        const exerciseTypeIds = body.exerciseTypeIds;
+        if (!Array.isArray(words) || !Array.isArray(exerciseTypeIds)) {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing words or exerciseTypeIds' }) };
+        }
+        const result = await gemini.generateWritingExercises(words, exerciseTypeIds);
+        return { statusCode: 200, headers, body: JSON.stringify(result) };
+      }
       default:
         return { statusCode: 400, headers, body: JSON.stringify({ error: 'Unknown action' }) };
     }

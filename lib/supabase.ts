@@ -14,6 +14,11 @@ export interface VocabWord {
   origin?: string;
   /** Optional semantic/word family label, e.g. "walk family" */
   word_family?: string | null;
+  part_of_speech?: string | null;
+  /** TEXT[] in DB; legacy single TEXT may still be parsed client-side */
+  grammar?: string[] | string | null;
+  writing?: string[] | string | null;
+  semantic?: string[] | string | null;
   etymology?: any;
   morphology?: any;
   letter_strings?: string[];
@@ -69,5 +74,19 @@ export interface VocabPracticeRecord {
   activity_type: 'spelling_snake' | 'spelling_bee' | 'disappearing_letters' | 'sentence_ninja' | 'flashcard' | 'quiz';
   correct: boolean;
   details?: Record<string, unknown>;
+  created_at?: string;
+}
+
+/** Writing / task sheet assigned by teacher to one student */
+export interface VocabStudentAssignment {
+  id: string;
+  student_id: string;
+  exercise_type: string | null;
+  title: string;
+  student_instructions: string;
+  main_content: string;
+  options: string[];
+  sort_order: number;
+  completed_at: string | null;
   created_at?: string;
 }

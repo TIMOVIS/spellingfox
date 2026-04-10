@@ -1,14 +1,18 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { WordEntry } from '../types';
-import SpellingModal from './SpellingModal';
-import DisappearingLettersModal from './DisappearingLettersModal';
-import SpellingBeeModal from './SpellingBeeModal';
-import SentenceNinjaModal from './SentenceNinjaModal';
 import FlashcardQuest from './FlashcardQuest';
 import QuizModal from './QuizModal';
-import { getStudentPracticeHistoryByDate, getTodayLondonDate } from '../lib/supabaseQueries';
+import {
+  getStudentPracticeHistoryByDate,
+  getTodayLondonDate,
+  getStudentAssignments,
+  markStudentAssignmentComplete,
+} from '../lib/supabaseQueries';
 import type { PracticeActivityType } from '../lib/supabaseQueries';
+import type { VocabStudentAssignment } from '../lib/supabase';
 import { formatWordForDisplay } from '../lib/wordDisplay';
+import { getWritingExerciseMeta } from '../lib/writingExerciseTypes';
+import { supabase } from '../lib/supabase';
 
 interface StudentDashboardProps {
   studentId: string | null;
@@ -22,10 +26,6 @@ type PracticeDay = { date: string; records: { word_id: string; word: string; act
 
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wordBank, dailyWordIds, onCompleteExercise }) => {
   const [viewMode, setViewMode] = useState<'hub' | 'wordList' | 'extraWords'>('hub');
-  const [showSpelling, setShowSpelling] = useState(false);
-  const [showSentenceNinja, setShowSentenceNinja] = useState(false);
-  const [showDisappearingLetters, setShowDisappearingLetters] = useState(false);
-  const [showSpellingBee, setShowSpellingBee] = useState(false);
   const [activeFlashcard, setActiveFlashcard] = useState<WordEntry | null>(null);
   const [showQuiz, setShowQuiz] = useState(false);
   const [quizWords, setQuizWords] = useState<string[]>([]);
@@ -33,24 +33,29 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
   const [quizWordEntries, setQuizWordEntries] = useState<WordEntry[] | null>(null);
   const [practiceHistory, setPracticeHistory] = useState<PracticeDay[]>([]);
   const [showPracticeHistory, setShowPracticeHistory] = useState(false);
-  /** Words to use in Spelling modal (daily quest or single word from flashcard/extra). */
-  const [wordsForSpelling, setWordsForSpelling] = useState<WordEntry[]>([]);
-  /** When set, Disappearing Letters uses these words (e.g. single word from flashcard); otherwise dailyWords. */
-  const [disappearingLettersWordEntries, setDisappearingLettersWordEntries] = useState<WordEntry[] | null>(null);
-  /** When set, Spelling Bee uses these words (e.g. single word from flashcard); otherwise dailyWords. */
-  const [spellingBeeWordEntries, setSpellingBeeWordEntries] = useState<WordEntry[] | null>(null);
+  const [teacherAssignments, setTeacherAssignments] = useState<VocabStudentAssignment[]>([]);
+  const [activeAssignment, setActiveAssignment] = useState<VocabStudentAssignment | null>(null);
+  const [markingAssignmentDone, setMarkingAssignmentDone] = useState(false);
   /** Filters on "Learn more words" page */
   const [extraYearFilter, setExtraYearFilter] = useState<string>('all');
   const [extraPatternFilter, setExtraPatternFilter] = useState<string>('all');
   const [extraSearch, setExtraSearch] = useState('');
   const [extraWordsPage, setExtraWordsPage] = useState(1);
 
+  const refreshAssignments = useCallback(() => {
+    if (!studentId) return;
+    getStudentAssignments(studentId)
+      .then(setTeacherAssignments)
+      .catch(() => setTeacherAssignments([]));
+  }, [studentId]);
+
   useEffect(() => {
     if (!studentId) return;
     getStudentPracticeHistoryByDate(studentId, 30)
       .then(setPracticeHistory)
       .catch(() => setPracticeHistory([]));
-  }, [studentId]);
+    refreshAssignments();
+  }, [studentId, refreshAssignments]);
 
   // Refetch when opening the panel so latest practice is shown
   useEffect(() => {
@@ -60,6 +65,32 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
         .catch(() => setPracticeHistory([]));
     }
   }, [showPracticeHistory, studentId]);
+
+  useEffect(() => {
+    if (!studentId) return;
+    const t = setInterval(() => refreshAssignments(), 20_000);
+    return () => clearInterval(t);
+  }, [studentId, refreshAssignments]);
+
+  useEffect(() => {
+    if (!studentId) return;
+    const channel = supabase
+      .channel(`student-assignments-${studentId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'vocab_student_assignments',
+          filter: `student_id=eq.${studentId}`,
+        },
+        () => refreshAssignments()
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [studentId, refreshAssignments]);
 
   const LONDON = 'Europe/London';
 
@@ -130,39 +161,31 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
     setExtraWordsPage(1);
   }, [extraYearFilter, extraPatternFilter, extraSearch]);
 
-  // Daily progress = (word × to-do) slots: each word has 5 slots (Daily Quest, Sentence Ninja, Disappearing letters, Word building, Bee); progress = completed slots / total slots
+  // Daily quest progress: flashcard + quiz per word (2 steps each)
   const todayDate = getTodayLondonDate();
   const todayRecords = useMemo(
     () => practiceHistory.find(d => d.date === todayDate)?.records ?? [],
     [practiceHistory, todayDate]
   );
-  const totalSlots = dailyWordIds.length * 5; // 5 activities per word
+  const totalSlots = dailyWordIds.length * 2;
   const completedSlots = useMemo(() => {
     if (dailyWordIds.length === 0) return 0;
     let n = 0;
     for (const wid of dailyWordIds) {
       if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'flashcard')) n += 1;
-      if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'sentence_ninja')) n += 1;
-      if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_snake')) n += 1;
-      if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'disappearing_letters')) n += 1;
-      if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_bee')) n += 1;
+      if (todayRecords.some(r => r.word_id === wid && r.activity_type === 'quiz')) n += 1;
     }
     return n;
   }, [dailyWordIds, todayRecords]);
   const progressPercent = totalSlots === 0 ? 0 : Math.round((completedSlots / totalSlots) * 100);
-  // To-do “fully done” when every daily word has that activity (for checkmarks)
-  const dailyQuestDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'flashcard'));
-  const sentenceNinjaDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'sentence_ninja'));
-  const spellingSnakeDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_snake'));
-  const disappearingLettersDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'disappearing_letters'));
-  const spellingBeeDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'spelling_bee')); 
+  const flashcardsDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'flashcard'));
+  const quizzesDone = dailyWords.length > 0 && dailyWordIds.every(wid => todayRecords.some(r => r.word_id === wid && r.activity_type === 'quiz'));
+  const dailyQuestComplete = flashcardsDone && quizzesDone;
 
-  const handleStartSpellingOnly = () => {
-    if (dailyWords.length > 0) {
-      setWordsForSpelling(dailyWords);
-      setShowSpelling(true);
-    }
-  };
+  const incompleteTeacherAssignments = useMemo(
+    () => teacherAssignments.filter(a => !a.completed_at),
+    [teacherAssignments]
+  );
 
   const handleMasterWord = (word: WordEntry) => {
     setActiveFlashcard(word);
@@ -173,12 +196,6 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
     setQuizWordEntries([word]);
     setActiveFlashcard(null);
     setShowQuiz(true);
-  };
-
-  const handleSpellingFromFlashcard = (word: WordEntry) => {
-    setWordsForSpelling([word]);
-    setActiveFlashcard(null);
-    setShowSpelling(true);
   };
 
   return (
@@ -193,7 +210,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
             <h1 className="text-4xl font-black tracking-tight mt-2 leading-tight">
               {greeting}, {name}! 🦊
             </h1>
-            <p className="text-orange-100 font-bold mt-2 opacity-90">Ready for your 5-minute quest?</p>
+            <p className="text-orange-100 font-bold mt-2 opacity-90">One daily quest: learn today&apos;s words, then try teacher extras.</p>
             
             {/* Background Fox Icon */}
             <div className="absolute -bottom-6 -right-6 text-9xl opacity-10 rotate-12 pointer-events-none select-none">
@@ -221,89 +238,74 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
                 />
               </div>
               <div className="flex flex-wrap gap-2 text-xs font-bold">
-                <span className={dailyQuestDone ? 'text-emerald-600' : 'text-gray-400'}>
-                  {dailyQuestDone ? '✓' : '○'} Daily Quest
+                <span className={flashcardsDone ? 'text-emerald-600' : 'text-gray-400'}>
+                  {flashcardsDone ? '✓' : '○'} Flashcards (all words)
                 </span>
-                <span className={sentenceNinjaDone ? 'text-emerald-600' : 'text-gray-400'}>
-                  {sentenceNinjaDone ? '✓' : '○'} Sentence Ninja
+                <span className={quizzesDone ? 'text-emerald-600' : 'text-gray-400'}>
+                  {quizzesDone ? '✓' : '○'} Quizzes (all words)
                 </span>
-                <span className={spellingSnakeDone ? 'text-emerald-600' : 'text-gray-400'}>
-                  {spellingSnakeDone ? '✓' : '○'} Word building
-                </span>
-                <span className={disappearingLettersDone ? 'text-emerald-600' : 'text-gray-400'}>
-                  {disappearingLettersDone ? '✓' : '○'} Disappearing letters
-                </span>
-                <span className={spellingBeeDone ? 'text-emerald-600' : 'text-gray-400'}>
-                  {spellingBeeDone ? '✓' : '○'} Bee
-                </span>
+                {dailyQuestComplete && (
+                  <span className="text-emerald-600">✓ Daily quest complete</span>
+                )}
               </div>
             </div>
 
-            {/* Main Buttons */}
+            {/* Main actions */}
             <div className="grid grid-cols-1 gap-4">
               <button 
                 onClick={() => setViewMode('wordList')}
-                className="group relative bg-indigo-600 hover:bg-indigo-700 text-white p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-xl border-b-8 border-indigo-900 overflow-hidden"
+                disabled={dailyWords.length === 0}
+                className="group relative bg-indigo-600 hover:bg-indigo-700 text-white p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-xl border-b-8 border-indigo-900 overflow-hidden disabled:opacity-50 disabled:pointer-events-none disabled:grayscale"
               >
                 <div className="relative z-10 flex items-center justify-between">
                   <div className="text-left">
-                    <span className="block text-3xl font-black">To do 1: Daily Quest</span>
+                    <span className="block text-3xl font-black">Daily quest</span>
+                    <span className="block text-sm font-bold text-indigo-200 mt-2 max-w-md">
+                      Learn each word with flashcards, then take the quiz for every word.
+                      {dailyWords.length > 0 && ` (${dailyWords.length} word${dailyWords.length !== 1 ? 's' : ''})`}
+                    </span>
                   </div>
                   <span className="text-5xl group-hover:translate-x-2 transition-transform">🎯</span>
                 </div>
                 <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform"></div>
               </button>
 
-              <button 
-                onClick={() => dailyWords.length > 0 && setShowSentenceNinja(true)}
-                disabled={dailyWords.length === 0}
-                className="group relative bg-indigo-100 hover:bg-indigo-200 text-indigo-800 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-indigo-200 overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
-              >
-                <div className="relative z-10 flex items-center justify-between">
-                  <div className="text-left">
-                    <span className="block text-3xl font-black">To do 2: Sentence Ninja</span>
+              {incompleteTeacherAssignments.length > 0 && (
+                <div className="rounded-[2rem] border-4 border-sky-100 bg-sky-50/80 p-6 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-black text-sky-800 uppercase tracking-widest">From your teacher</span>
+                    <span className="text-xs font-black bg-sky-200 text-sky-900 px-2 py-1 rounded-lg">
+                      {incompleteTeacherAssignments.length} to do
+                    </span>
                   </div>
-                  <span className="text-5xl group-hover:scale-110 transition-transform">🥷</span>
+                  <p className="text-sm text-sky-900/80 font-medium">
+                    Your teacher picked these writing tasks for you. Open one, work on paper, then tap done.
+                  </p>
+                  <ul className="space-y-2">
+                    {incompleteTeacherAssignments.map(a => {
+                      const meta = a.exercise_type ? getWritingExerciseMeta(a.exercise_type) : undefined;
+                      return (
+                        <li key={a.id}>
+                          <button
+                            type="button"
+                            onClick={() => setActiveAssignment(a)}
+                            className="w-full text-left bg-white hover:bg-sky-100 border-2 border-sky-200 rounded-2xl px-5 py-4 font-black text-sky-950 shadow-sm transition-colors flex items-center justify-between gap-2"
+                          >
+                            <span>{meta?.label ?? a.title}</span>
+                            <span className="text-xl shrink-0">📋</span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 </div>
-              </button>
+              )}
 
-              <button 
-                onClick={() => dailyWords.length > 0 && setShowDisappearingLetters(true)}
-                disabled={dailyWords.length === 0}
-                className="group relative bg-teal-100 hover:bg-teal-200 text-teal-800 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-teal-200 overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
-              >
-                <div className="relative z-10 flex items-center justify-between">
-                  <div className="text-left">
-                    <span className="block text-3xl font-black">To do 3: Disappearing letters</span>
-                  </div>
-                  <span className="text-5xl group-hover:scale-110 transition-transform">✨</span>
-                </div>
-              </button>
-
-              <button 
-                onClick={handleStartSpellingOnly}
-                className="group relative bg-orange-100 hover:bg-orange-200 text-orange-700 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-orange-200 overflow-hidden"
-              >
-                <div className="relative z-10 flex items-center justify-between">
-                  <div className="text-left">
-                    <span className="block text-3xl font-black">To do 4: Word building</span>
-                  </div>
-                  <span className="text-5xl group-hover:rotate-12 transition-transform">🧩</span>
-                </div>
-              </button>
-
-              <button 
-                onClick={() => dailyWords.length > 0 && setShowSpellingBee(true)}
-                disabled={dailyWords.length === 0}
-                className="group relative bg-amber-100 hover:bg-amber-200 text-amber-800 p-8 rounded-[2rem] transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg border-2 border-amber-200 overflow-hidden disabled:opacity-50 disabled:pointer-events-none"
-              >
-                <div className="relative z-10 flex items-center justify-between">
-                  <div className="text-left">
-                    <span className="block text-3xl font-black">To do 5: Spelling Bee</span>
-                  </div>
-                  <span className="text-5xl group-hover:scale-110 transition-transform">🐝</span>
-                </div>
-              </button>
+              {studentId && incompleteTeacherAssignments.length === 0 && teacherAssignments.length > 0 && (
+                <p className="text-center text-sm font-bold text-sky-700/80">
+                  You&apos;re up to date on teacher exercises. Nice work!
+                </p>
+              )}
 
               {extraWords.length > 0 && (
                 <button 
@@ -353,7 +355,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
               </svg>
               BACK TO HUB
             </button>
-            <h2 className="text-2xl font-black text-indigo-900 tracking-tight">Today's List 📝</h2>
+            <h2 className="text-2xl font-black text-indigo-900 tracking-tight">Today&apos;s daily quest 📝</h2>
           </div>
 
           <div className="space-y-4">
@@ -504,110 +506,11 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
       )}
 
       {/* Modals */}
-      {showSpelling && (
-        <SpellingModal 
-          wordEntries={wordsForSpelling.length > 0 ? wordsForSpelling : dailyWords}
-          onClose={() => setShowSpelling(false)}
-          onFinish={async (pts, wordResults) => {
-            const opts = wordResults?.length ? { wordResults, activityType: 'spelling_snake' as const } : undefined;
-            try {
-              await Promise.resolve(onCompleteExercise(pts, opts));
-              if (studentId) {
-                const history = await getStudentPracticeHistoryByDate(studentId, 30);
-                setPracticeHistory(history);
-              }
-            } catch (e) {
-              console.error('Save practice failed:', e);
-            }
-            setShowSpelling(false);
-          }}
-        />
-      )}
-
-      {showSentenceNinja && (
-        <SentenceNinjaModal
-          wordEntries={dailyWords}
-          onClose={() => setShowSentenceNinja(false)}
-          onFinish={async (pts, wordResults) => {
-            const opts = wordResults?.length ? { wordResults, activityType: 'sentence_ninja' as const } : undefined;
-            try {
-              await Promise.resolve(onCompleteExercise(pts, opts));
-              if (studentId) {
-                const history = await getStudentPracticeHistoryByDate(studentId, 30);
-                setPracticeHistory(history);
-              }
-            } catch (e) {
-              console.error('Save practice failed:', e);
-            }
-            setShowSentenceNinja(false);
-          }}
-        />
-      )}
-
-      {showDisappearingLetters && (
-        <DisappearingLettersModal
-          wordEntries={disappearingLettersWordEntries ?? dailyWords}
-          onClose={() => {
-            setShowDisappearingLetters(false);
-            setDisappearingLettersWordEntries(null);
-          }}
-          onFinish={async (pts, wordResults) => {
-            const opts = wordResults?.length ? { wordResults, activityType: 'disappearing_letters' as const } : undefined;
-            try {
-              await Promise.resolve(onCompleteExercise(pts, opts));
-              if (studentId) {
-                const history = await getStudentPracticeHistoryByDate(studentId, 30);
-                setPracticeHistory(history);
-              }
-            } catch (e) {
-              console.error('Save practice failed:', e);
-            }
-            setShowDisappearingLetters(false);
-            setDisappearingLettersWordEntries(null);
-          }}
-        />
-      )}
-
-      {showSpellingBee && (
-        <SpellingBeeModal 
-          wordEntries={spellingBeeWordEntries ?? dailyWords}
-          onClose={() => {
-            setShowSpellingBee(false);
-            setSpellingBeeWordEntries(null);
-          }}
-          onFinish={async (pts, wordResults) => {
-            const opts = wordResults?.length ? { wordResults, activityType: 'spelling_bee' as const } : undefined;
-            try {
-              await Promise.resolve(onCompleteExercise(pts, opts));
-              if (studentId) {
-                const history = await getStudentPracticeHistoryByDate(studentId, 30);
-                setPracticeHistory(history);
-              }
-            } catch (e) {
-              console.error('Save practice failed:', e);
-            }
-            setShowSpellingBee(false);
-            setSpellingBeeWordEntries(null);
-          }}
-        />
-      )}
-
       {activeFlashcard && (
         <FlashcardQuest
           word={activeFlashcard}
           onClose={() => setActiveFlashcard(null)}
           onStartQuiz={handleQuizFromFlashcard}
-          onStartSpelling={handleSpellingFromFlashcard}
-          onStartDisappearingLetters={(word) => {
-            setDisappearingLettersWordEntries([word]);
-            setActiveFlashcard(null);
-            setShowDisappearingLetters(true);
-          }}
-          onStartSpellingBee={(word) => {
-            setSpellingBeeWordEntries([word]);
-            setActiveFlashcard(null);
-            setShowSpellingBee(true);
-          }}
           onWordViewed={(word) => {
             onCompleteExercise(0, {
               wordResults: [{ wordId: word.id, word: word.word, correct: true }],
@@ -645,6 +548,64 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
         />
       )}
 
+      {activeAssignment && (
+        <div className="fixed inset-0 bg-sky-950/70 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full max-h-[88vh] overflow-hidden flex flex-col border-4 border-sky-200 shadow-2xl">
+            <div className="p-5 border-b border-sky-100 flex justify-between items-start gap-2 shrink-0">
+              <h2 className="text-xl font-black text-sky-950 leading-tight pr-2">
+                {activeAssignment.exercise_type
+                  ? getWritingExerciseMeta(activeAssignment.exercise_type)?.label ?? activeAssignment.title
+                  : activeAssignment.title}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setActiveAssignment(null)}
+                className="p-2 hover:bg-sky-100 rounded-xl shrink-0"
+                aria-label="Close"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto flex-1 min-h-0 space-y-4">
+              <p className="text-sm font-bold text-gray-800 whitespace-pre-wrap">{activeAssignment.student_instructions}</p>
+              <div className="bg-sky-50 rounded-2xl p-4 border border-sky-100">
+                <p className="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">{activeAssignment.main_content}</p>
+              </div>
+              {activeAssignment.options && activeAssignment.options.length > 0 && (
+                <ol className="list-decimal list-inside space-y-1 text-sm font-bold text-gray-800">
+                  {activeAssignment.options.map((o, i) => (
+                    <li key={i}>{o}</li>
+                  ))}
+                </ol>
+              )}
+            </div>
+            <div className="p-5 border-t border-sky-100 shrink-0">
+              <button
+                type="button"
+                disabled={markingAssignmentDone}
+                onClick={async () => {
+                  setMarkingAssignmentDone(true);
+                  try {
+                    await markStudentAssignmentComplete(activeAssignment.id);
+                    refreshAssignments();
+                    setActiveAssignment(null);
+                  } catch (e) {
+                    console.error('Mark assignment complete failed:', e);
+                  } finally {
+                    setMarkingAssignmentDone(false);
+                  }
+                }}
+                className="w-full bg-emerald-600 text-white py-3.5 rounded-2xl font-black hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+              >
+                {markingAssignmentDone ? 'Saving…' : "I've finished this"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Practice history overlay */}
       {showPracticeHistory && (
         <div className="fixed inset-0 bg-amber-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
@@ -657,7 +618,7 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
             </div>
             <div className="p-4 sm:p-6 overflow-y-auto flex-1 min-h-0">
               {practiceHistory.length === 0 ? (
-                <p className="text-gray-500 font-bold text-center py-8">No practice recorded yet. Complete Sentence Ninja, Word building, Disappearing letters or Spelling Bee to see your history here.</p>
+                <p className="text-gray-500 font-bold text-center py-8">No practice recorded yet. Complete your daily quest flashcards and quizzes to see your history here.</p>
               ) : (
                 <ul className="space-y-6">
                   {practiceHistory.map(({ date, records }) => {
@@ -686,7 +647,19 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, name, wo
                                       a.correct ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
                                     }`}
                                   >
-                                    {a.activity_type === 'spelling_snake' ? 'Word building' : a.activity_type === 'spelling_bee' ? 'Bee' : a.activity_type === 'disappearing_letters' ? 'Disappearing letters' : a.activity_type === 'sentence_ninja' ? 'Sentence Ninja' : a.activity_type === 'flashcard' ? 'Flashcard' : a.activity_type}{' '}
+                                    {a.activity_type === 'spelling_snake'
+                                      ? 'Word building'
+                                      : a.activity_type === 'spelling_bee'
+                                        ? 'Bee'
+                                        : a.activity_type === 'disappearing_letters'
+                                          ? 'Disappearing letters'
+                                          : a.activity_type === 'sentence_ninja'
+                                            ? 'Sentence Ninja'
+                                            : a.activity_type === 'flashcard'
+                                              ? 'Flashcard'
+                                              : a.activity_type === 'quiz'
+                                                ? 'Quiz'
+                                                : a.activity_type}{' '}
                                     {a.correct ? '✓' : '✗'}
                                   </span>
                                 ))}
