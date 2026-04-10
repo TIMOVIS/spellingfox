@@ -55,10 +55,16 @@ export const handler = async (event: { httpMethod: string; body: string | null }
       case 'writingExercises': {
         const words = body.words;
         const exerciseTypeIds = body.exerciseTypeIds;
+        const priorByWordAndType =
+          body.priorByWordAndType &&
+          typeof body.priorByWordAndType === 'object' &&
+          !Array.isArray(body.priorByWordAndType)
+            ? (body.priorByWordAndType as Record<string, Record<string, string[]>>)
+            : undefined;
         if (!Array.isArray(words) || !Array.isArray(exerciseTypeIds)) {
           return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing words or exerciseTypeIds' }) };
         }
-        const result = await gemini.generateWritingExercises(words, exerciseTypeIds);
+        const result = await gemini.generateWritingExercises(words, exerciseTypeIds, priorByWordAndType);
         return { statusCode: 200, headers, body: JSON.stringify(result) };
       }
       default:

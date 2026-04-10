@@ -2,6 +2,12 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { WordEntry, YearGroup } from "./types";
 import { WRITING_EXERCISE_TYPES, WRITING_EXERCISE_TYPE_IDS } from "./lib/writingExerciseTypes";
+import {
+  PART_OF_SPEECH_VALUES,
+  GRAMMAR_TAGS,
+  WRITING_TAGS,
+  SEMANTIC_TAGS,
+} from "./lib/vocabTaxonomy";
 
 const apiKey = typeof process !== 'undefined' ? (process.env.API_KEY || '') : '';
 // Only create the client when we have a key (SDK throws if key is empty)
@@ -43,6 +49,12 @@ export const generateWordExplanation = async (word: string): Promise<Partial<Wor
     6. Provide an example sentence from or in the style of famous children's literature (e.g., Roald Dahl, J.K. Rowling, C.S. Lewis)
     7. Include at least 2 clear antonyms
     8. The DEFINITION must be written so that a 9–10 year old (Year 5) can easily understand it: short sentences, simple everyday words, and no technical grammar terms.
+    9. CURRICULUM TAXONOMY (exact snake_case ids only — our database rejects anything else):
+       - partOfSpeech: exactly ONE of: ${PART_OF_SPEECH_VALUES.join(", ")}
+       - grammarTags: 0–4 ids from: ${GRAMMAR_TAGS.join(", ")}
+       - writingTags: 0–4 ids from: ${WRITING_TAGS.join(", ")}
+       - semanticTags: 0–3 ids from: ${SEMANTIC_TAGS.join(", ")}
+       Choose only tags that genuinely apply; use empty arrays where none fit.
     
     The learning point should be specific and curriculum-focused, relating directly to etymology, morphology, or letter strings.`,
     config: {
@@ -84,9 +96,29 @@ export const generateWordExplanation = async (word: string): Promise<Partial<Wor
           learningPoint: { 
             type: Type.STRING,
             description: 'Must relate to etymology (e.g., "Latin root Bene"), morphology (e.g., "-ous suffix"), or letter strings (e.g., "Words with ough")'
-          }
+          },
+          partOfSpeech: {
+            type: Type.STRING,
+            enum: [...PART_OF_SPEECH_VALUES],
+            description: 'Primary part of speech (snake_case id)',
+          },
+          grammarTags: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: '0–4 grammar taxonomy ids from the prompt list only',
+          },
+          writingTags: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: '0–4 writing taxonomy ids from the prompt list only',
+          },
+          semanticTags: {
+            type: Type.ARRAY,
+            items: { type: Type.STRING },
+            description: '0–3 semantic taxonomy ids from the prompt list only',
+          },
         },
-        required: ["word", "definition", "synonyms", "antonyms", "example", "yearGroup", "learningPoint", "etymology", "morphology", "letterStrings"]
+        required: ["word", "definition", "synonyms", "antonyms", "example", "yearGroup", "learningPoint", "etymology", "morphology", "letterStrings", "partOfSpeech", "grammarTags", "writingTags", "semanticTags"]
       }
     }
   });
@@ -258,6 +290,8 @@ export const extractVocabularyFromFile = async (base64Data: string, mimeType: st
 
 export interface GeneratedWritingExerciseItem {
   exerciseType: string;
+  /** Vocabulary word this exercise is anchored on (one exercise per word). */
+  focusWord?: string;
   title: string;
   studentInstructions: string;
   mainContent: string;
@@ -269,11 +303,32 @@ export interface GeneratedWritingExerciseItem {
 const MAX_WORDS_FOR_WRITING_EXERCISES = 12;
 
 /**
+ * Prior worksheet text for this pupil: wordId → exerciseTypeId → snippets from past assignments
+ * (so the model can generate new sentences/tasks, not duplicates).
+ */
+export type PriorWritingExercisesByWordAndType = Record<string, Record<string, string[]>>;
+
+function priorTasksBlurb(
+  wordId: string,
+  exerciseType: string,
+  prior?: PriorWritingExercisesByWordAndType
+): string {
+  const list = prior?.[wordId]?.[exerciseType];
+  if (!list?.length) return '';
+  const blocks = list.map((text, j) => `(Earlier task ${j + 1})\n${text.trim()}`).join('\n\n');
+  return (
+    `\n   ALREADY USED for this pupil (same focus word + same exercise type). Do NOT reuse, paraphrase lightly, or copy these sentences/contexts. Invent fresh settings, new stems, different “weak” words to replace, different distractors, different ramble to cut, etc.:\n\n ${blocks.replace(/\n/g, '\n   ')}`
+  );
+}
+
+/**
  * Generate teacher-ready writing exercises anchored on selected vocabulary.
+ * @param priorByWordAndType Optional past assignment snippets per word + exercise type (avoids duplicate worksheet text for the same pupil).
  */
 export const generateWritingExercises = async (
-  words: Pick<WordEntry, "word" | "definition" | "example" | "yearGroup">[],
-  exerciseTypeIds: string[]
+  words: Pick<WordEntry, "id" | "word" | "definition" | "example" | "yearGroup">[],
+  exerciseTypeIds: string[],
+  priorByWordAndType?: PriorWritingExercisesByWordAndType
 ): Promise<GeneratedWritingExerciseItem[]> => {
   const trimmedWords = words.slice(0, MAX_WORDS_FOR_WRITING_EXERCISES);
   if (trimmedWords.length === 0) {
@@ -284,6 +339,12 @@ export const generateWritingExercises = async (
     throw new Error("Choose at least one exercise type.");
   }
 
+  /** One exercise per word; cycle through selected types so different words get different kinds when the teacher picks several. */
+  const plan = trimmedWords.map((w, i) => ({
+    word: w,
+    typeId: ids[i % ids.length] as (typeof WRITING_EXERCISE_TYPE_IDS)[number],
+  }));
+
   const typeLines = ids
     .map(id => {
       const m = WRITING_EXERCISE_TYPES.find(t => t.id === id);
@@ -291,40 +352,58 @@ export const generateWritingExercises = async (
     })
     .join("\n");
 
-  const wordBlock = trimmedWords
-    .map(w => {
-      const ex = (w.example || "").trim();
-      const exShort = ex.length > 160 ? `${ex.slice(0, 157)}…` : ex;
-      return `• ${w.word} (${w.yearGroup}): ${w.definition}${exShort ? ` Example from bank: ${exShort}` : ""}`;
+  const assignmentBlock = plan
+    .map((p, i) => {
+      const ex = (p.word.example || "").trim();
+      const exShort = ex.length > 140 ? `${ex.slice(0, 137)}…` : ex;
+      const defShort =
+        (p.word.definition || "").length > 220 ? `${(p.word.definition || "").slice(0, 217)}…` : p.word.definition || "";
+      const m = WRITING_EXERCISE_TYPES.find(t => t.id === p.typeId);
+      const avoidDup = priorTasksBlurb(p.word.id, p.typeId, priorByWordAndType);
+      return (
+        `ITEM ${i + 1} — focusWord (must copy exactly into JSON field "focusWord"): "${p.word.word}"\n` +
+        `   yearGroup: ${p.word.yearGroup}\n` +
+        `   definition (from bank): ${defShort}\n` +
+        (exShort ? `   example (from bank): ${exShort}\n` : "") +
+        `   exerciseType (must be exactly this string): "${p.typeId}"\n` +
+        (m ? `   task style: ${m.label} — ${m.description}` : "") +
+        avoidDup
+      );
     })
-    .join("\n");
+    .join("\n\n");
 
-  const orderedIds = ids.join(", ");
+  const n = plan.length;
 
   const prompt = `You create printable writing tasks for UK primary school pupils (ages 7–11).
 
-TARGET VOCABULARY (use these words naturally; do not define them in the pupil-facing text unless the task requires it):
-${wordBlock}
+You must output a JSON array of EXACTLY ${n} objects, in order: item 1 = ITEM 1 below, item 2 = ITEM 2, etc.
 
-You must output EXACTLY ${ids.length} exercises, ONE for each type below, IN THIS ORDER: ${orderedIds}
+ASSIGNMENT (one exercise per line — do not merge words, do not skip, do not reorder):
+${assignmentBlock}
 
-For each exercise type, follow the brief:
+Reference — all selected exercise types (follow the line above for which type goes with which item):
 ${typeLines}
 
 Rules:
 - Language: British English. Clear, child-friendly instructions.
-- Each exercise must clearly relate to at least one target word (in the stimulus, options, or expected improvement), except "cut the ramble" and "show-not-tell" may use a general topic while still mentioning one target word in the teacher notes if possible.
+- Each array item MUST set "focusWord" to the exact focus word string from its ITEM line (same spelling/casing as given).
+- Each item's "exerciseType" MUST equal the exerciseType string on its ITEM line exactly.
+- If an ITEM includes "ALREADY USED for this pupil", you must produce genuinely new worksheet material: new sentences, new scenario, new distractors—nothing that reads like a minor edit of those earlier tasks.
+- Centre the pupil task on that item's focus word (stimulus, gap, rewrite, or choices). For "cut_the_ramble" and "show_not_tell", still weave in the focus word where natural.
 - mainContent is what appears on the worksheet (sentences, bullet steps, numbered layers, etc.). Use plain text with line breaks; no markdown headings.
 - For multiple-choice style tasks, put the choices in "options" (3–5 strings). For others, use an empty array for options.
 - answerKey: short correct answer or model response for the teacher.
 - teacherNotes: one line tip for teaching or differentiation.
 
-Return a JSON array only. Each item's "exerciseType" must be exactly one of: ${orderedIds}`;
+Return a JSON array only, length ${n}.`;
 
   if (!apiKey || !ai) {
     return callGeminiServer<GeneratedWritingExerciseItem[]>("writingExercises", {
       words: trimmedWords,
       exerciseTypeIds: ids,
+      ...(priorByWordAndType && Object.keys(priorByWordAndType).length > 0
+        ? { priorByWordAndType }
+        : {}),
     });
   }
 
@@ -342,6 +421,10 @@ Return a JSON array only. Each item's "exerciseType" must be exactly one of: ${o
               type: Type.STRING,
               enum: [...WRITING_EXERCISE_TYPE_IDS],
             },
+            focusWord: {
+              type: Type.STRING,
+              description: "The vocabulary word this exercise is anchored on (must match the assignment line)",
+            },
             title: { type: Type.STRING },
             studentInstructions: { type: Type.STRING },
             mainContent: { type: Type.STRING },
@@ -351,6 +434,7 @@ Return a JSON array only. Each item's "exerciseType" must be exactly one of: ${o
           },
           required: [
             "exerciseType",
+            "focusWord",
             "title",
             "studentInstructions",
             "mainContent",
@@ -368,18 +452,34 @@ Return a JSON array only. Each item's "exerciseType" must be exactly one of: ${o
     throw new Error("Invalid response from writing exercise generator.");
   }
 
-  const byId = new Map(raw.map(item => [item.exerciseType, item]));
-  const ordered: GeneratedWritingExerciseItem[] = [];
-  for (const id of ids) {
-    const item = byId.get(id);
-    if (item) ordered.push(item);
-  }
-  if (ordered.length < ids.length) {
+  if (raw.length !== plan.length) {
     throw new Error(
-      `The AI returned ${ordered.length} of ${ids.length} exercises. Try generating again.`
+      `Expected ${plan.length} exercise(s) (one per word), got ${raw.length}. Try generating again.`
     );
   }
-  return ordered;
+
+  const normalized: GeneratedWritingExerciseItem[] = [];
+  for (let i = 0; i < plan.length; i++) {
+    const item = raw[i];
+    const expectedType = plan[i].typeId;
+    const expectedWord = plan[i].word.word;
+    if (!item || item.exerciseType !== expectedType) {
+      throw new Error(
+        `Exercise ${i + 1} should use type "${expectedType}". Try generating again.`
+      );
+    }
+    const focus = (item.focusWord || "").trim();
+    if (focus.toLowerCase() !== expectedWord.toLowerCase()) {
+      throw new Error(
+        `Exercise ${i + 1} should focus on word "${expectedWord}". Try generating again.`
+      );
+    }
+    normalized.push({
+      ...item,
+      focusWord: expectedWord,
+    });
+  }
+  return normalized;
 };
 
 export const generateQuizQuestions = async (words: string[]) => {

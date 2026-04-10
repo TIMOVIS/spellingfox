@@ -39,6 +39,8 @@ export interface StudentData {
   streak: number;
   wordBank: WordEntry[];
   dailyWordIds: string[]; // IDs of words selected for today's list
+  /** Word IDs ticked for "Writing exercises" (stored in Supabase). */
+  writingWordIds: string[];
 }
 
 export interface AppState {

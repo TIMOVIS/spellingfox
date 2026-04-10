@@ -58,6 +58,15 @@ export interface VocabDailyQuest {
   assigned_at?: string;
 }
 
+/** Teacher-selected vocabulary for printable writing exercises (per student). */
+export interface VocabStudentWritingWord {
+  id: string;
+  student_id: string;
+  word_id: string;
+  sort_order: number;
+  assigned_at?: string;
+}
+
 export interface VocabQuestCompletion {
   id: string;
   daily_quest_id: string;
@@ -81,6 +90,8 @@ export interface VocabPracticeRecord {
 export interface VocabStudentAssignment {
   id: string;
   student_id: string;
+  /** Vocabulary word this exercise was generated for (omitted on legacy rows / old DB). */
+  word_id?: string | null;
   exercise_type: string | null;
   title: string;
   student_instructions: string;

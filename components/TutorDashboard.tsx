@@ -1,10 +1,11 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { WordEntry, YearGroup } from '../types';
 import { generateWordExplanation, extractVocabularyFromFile, generateDailySpellingList } from '../geminiService';
-import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests, getStudentProgress, getStudentPracticeHistoryByDate, assignWordsToDailyQuest, getTodayLondonDate } from '../lib/supabaseQueries';
+import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests, getStudentProgress, getStudentPracticeHistoryByDate, getStudentAssignments, assignWordsToDailyQuest, getTodayLondonDate } from '../lib/supabaseQueries';
 import { formatWordForDisplay } from '../lib/wordDisplay';
-import { VocabWord } from '../lib/supabase';
+import { VocabWord, VocabStudentAssignment } from '../lib/supabase';
+import { getWritingExerciseMeta } from '../lib/writingExerciseTypes';
 import { vocabWordToWordEntry } from '../lib/vocabWordEntry';
 import {
   GRAMMAR_TAGS,
@@ -18,6 +19,64 @@ import {
 } from '../lib/vocabTaxonomy';
 import WritingExercisesModal from './WritingExercisesModal';
 
+function firstNonEmptyString(...vals: unknown[]): string | undefined {
+  for (const v of vals) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+/** Add part_of_speech / grammar / writing / semantic from AI enrich when those fields are empty on the word. */
+function applyAiCurriculumToWordUpdates(aiData: Record<string, unknown>, w: WordEntry, updates: Partial<VocabWord>) {
+  const pos = normalizePartOfSpeechForSave(firstNonEmptyString(aiData.partOfSpeech, aiData.part_of_speech));
+  if (!w.partOfSpeech?.trim() && pos) {
+    updates.part_of_speech = pos;
+  }
+
+  const grammarRaw = aiData.grammarTags ?? aiData.grammar_tags;
+  const grammarNorm = normalizeTagArrayForSave(
+    Array.isArray(grammarRaw) ? grammarRaw.filter((x): x is string => typeof x === 'string') : [],
+    GRAMMAR_TAGS
+  );
+  if (!w.grammar?.length && grammarNorm.length) {
+    updates.grammar = grammarNorm;
+  }
+
+  const writingRaw = aiData.writingTags ?? aiData.writing_tags;
+  const writingNorm = normalizeTagArrayForSave(
+    Array.isArray(writingRaw) ? writingRaw.filter((x): x is string => typeof x === 'string') : [],
+    WRITING_TAGS
+  );
+  if (!w.writing?.length && writingNorm.length) {
+    updates.writing = writingNorm;
+  }
+
+  const semanticRaw = aiData.semanticTags ?? aiData.semantic_tags;
+  const semanticNorm = normalizeTagArrayForSave(
+    Array.isArray(semanticRaw) ? semanticRaw.filter((x): x is string => typeof x === 'string') : [],
+    SEMANTIC_TAGS
+  );
+  if (!w.semantic?.length && semanticNorm.length) {
+    updates.semantic = semanticNorm;
+  }
+}
+
+function londonCalendarDateKey(iso: string | undefined): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+}
+
+function londonDateHeading(iso: string | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-GB', {
+    timeZone: 'Europe/London',
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
 interface TutorDashboardProps {
   studentName: string;
   studentId: string;
@@ -30,10 +89,13 @@ interface TutorDashboardProps {
   onUpdateWords: (newWords: WordEntry[]) => void;
   onToggleDaily: (id: string) => void;
   onRefetchDailyQuest?: () => Promise<void>;
+  /** Word IDs ticked for "Writing exercises" (persisted in App state per student). */
+  writingExerciseWordIds: string[];
+  onWritingExerciseWordIdsChange: (ids: string[]) => void;
   onBack: () => void;
 }
 
-const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId, wordBank, dailyWordIds, allStudents, onBulkAssignDailyQuest, onReplaceDailyQuest, onUpdateWords, onToggleDaily, onRefetchDailyQuest, onBack }) => {
+const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId, wordBank, dailyWordIds, allStudents, onBulkAssignDailyQuest, onReplaceDailyQuest, onUpdateWords, onToggleDaily, onRefetchDailyQuest, writingExerciseWordIds, onWritingExerciseWordIdsChange, onBack }) => {
   const [newWord, setNewWord] = useState('');
   const [loading, setLoading] = useState(false);
   const [showBulkAssignModal, setShowBulkAssignModal] = useState(false);
@@ -57,7 +119,6 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const [filterPinnedOnly, setFilterPinnedOnly] = useState<boolean>(false);
   const [filterSearch, setFilterSearch] = useState<string>('');
   const [wordBankPage, setWordBankPage] = useState(1);
-  const [selectedExerciseWordIds, setSelectedExerciseWordIds] = useState<Set<string>>(new Set());
   const [writingExercisesOpen, setWritingExercisesOpen] = useState(false);
   const [dailyBulkReplacing, setDailyBulkReplacing] = useState(false);
   const [editingWord, setEditingWord] = useState<WordEntry | null>(null);
@@ -78,6 +139,37 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const [practiceHistory, setPracticeHistory] = useState<Array<{ date: string; records: Array<{ word: string; activity_type: string; correct: boolean }> }>>([]);
   const [progressSectionOpen, setProgressSectionOpen] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(false);
+  const [pastWritingAssignments, setPastWritingAssignments] = useState<VocabStudentAssignment[]>([]);
+  const [pastWritingLoading, setPastWritingLoading] = useState(false);
+
+  const pastWritingByDate = useMemo(() => {
+    const map = new Map<string, VocabStudentAssignment[]>();
+    for (const a of pastWritingAssignments) {
+      const key = londonCalendarDateKey(a.created_at);
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(a);
+    }
+    const entries = [...map.entries()].sort((x, y) => y[0].localeCompare(x[0]));
+    for (const [, rows] of entries) {
+      rows.sort((a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return ta - tb;
+      });
+    }
+    return entries;
+  }, [pastWritingAssignments]);
+
+  const refreshPastWritingAssignments = useCallback(() => {
+    if (!studentId || studentId.startsWith('temp-')) {
+      setPastWritingAssignments([]);
+      return;
+    }
+    getStudentAssignments(studentId)
+      .then(setPastWritingAssignments)
+      .catch(() => setPastWritingAssignments([]));
+  }, [studentId]);
 
   // Load words from Supabase on mount
   useEffect(() => {
@@ -102,6 +194,29 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   useEffect(() => {
     setSelectedPastDate(null);
     setPastQuestDetail([]);
+  }, [studentId]);
+
+  useEffect(() => {
+    if (!studentId || studentId.startsWith('temp-')) {
+      setPastWritingAssignments([]);
+      setPastWritingLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPastWritingLoading(true);
+    getStudentAssignments(studentId)
+      .then(rows => {
+        if (!cancelled) setPastWritingAssignments(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setPastWritingAssignments([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPastWritingLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [studentId]);
 
   // Load student progress (points, streak) and practice history when section is opened or student changes
@@ -567,6 +682,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
       if (aiData.letterStrings?.length) updates.letter_strings = aiData.letterStrings;
       if (aiData.root?.trim()) updates.root = aiData.root;
       if (aiData.origin?.trim()) updates.origin = aiData.origin;
+      applyAiCurriculumToWordUpdates(aiData as unknown as Record<string, unknown>, w, updates);
       if (Object.keys(updates).length === 0) return;
       await updateWordInSupabase(w.id, updates);
       const vocabWords = await getAllWords();
@@ -605,6 +721,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
         if (aiData.letterStrings?.length) updates.letter_strings = aiData.letterStrings;
         if (aiData.root?.trim()) updates.root = aiData.root;
         if (aiData.origin?.trim()) updates.origin = aiData.origin;
+        applyAiCurriculumToWordUpdates(aiData as unknown as Record<string, unknown>, w, updates);
         if (Object.keys(updates).length > 0) {
           await updateWordInSupabase(w.id, updates);
         }
@@ -719,28 +836,24 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   );
 
   const toggleExerciseWordSelection = (id: string) => {
-    setSelectedExerciseWordIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    const next = new Set(writingExerciseWordIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onWritingExerciseWordIdsChange([...next]);
   };
 
   const toggleSelectAllExerciseWordsOnPage = () => {
-    const ids = paginatedWords.map(w => w.id);
-    setSelectedExerciseWordIds(prev => {
-      const next = new Set(prev);
-      const allOn = ids.length > 0 && ids.every(id => next.has(id));
-      if (allOn) ids.forEach(id => next.delete(id));
-      else ids.forEach(id => next.add(id));
-      return next;
-    });
+    const pageIds = paginatedWords.map(w => w.id);
+    const next = new Set(writingExerciseWordIds);
+    const allOn = pageIds.length > 0 && pageIds.every(id => next.has(id));
+    if (allOn) pageIds.forEach(id => next.delete(id));
+    else pageIds.forEach(id => next.add(id));
+    onWritingExerciseWordIdsChange([...next]);
   };
 
-  const selectedWordsForExercises = wordBank.filter(w => selectedExerciseWordIds.has(w.id));
+  const selectedWordsForExercises = wordBank.filter(w => writingExerciseWordIds.includes(w.id));
   const allPageExerciseSelected =
-    paginatedWords.length > 0 && paginatedWords.every(w => selectedExerciseWordIds.has(w.id));
+    paginatedWords.length > 0 && paginatedWords.every(w => writingExerciseWordIds.includes(w.id));
   const allPageDailySelected =
     paginatedWords.length > 0 && paginatedWords.every(w => dailyWordIds.includes(w.id));
 
@@ -1242,13 +1355,13 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                <button
                  type="button"
                  onClick={() => setWritingExercisesOpen(true)}
-                 disabled={selectedExerciseWordIds.size === 0}
+                 disabled={writingExerciseWordIds.length === 0}
                  className="bg-teal-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-sm hover:bg-teal-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-                 title="Generate printable writing tasks from ticked words"
+                 title="One AI writing task per ticked word; selected exercise types rotate across words"
                >
                  📝 Writing exercises
-                 {selectedExerciseWordIds.size > 0 && (
-                   <span className="bg-white/20 px-2 py-0.5 rounded-lg">{selectedExerciseWordIds.size}</span>
+                 {writingExerciseWordIds.length > 0 && (
+                   <span className="bg-white/20 px-2 py-0.5 rounded-lg">{writingExerciseWordIds.length}</span>
                  )}
                </button>
             </div>
@@ -1258,22 +1371,22 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
             <span className="font-black text-teal-800">writing exercises</span> (teal checkboxes) are{' '}
             <span className="font-black text-gray-800">independent</span>—pick different words for each.
           </p>
-          {(dailyWordIds.length > 0 || selectedExerciseWordIds.size > 0) && (
+          {(dailyWordIds.length > 0 || writingExerciseWordIds.length > 0) && (
             <p className="text-xs font-bold text-gray-800 mb-3">
               {dailyWordIds.length > 0 && (
                 <span className="text-amber-900">
                   {dailyWordIds.length} word{dailyWordIds.length !== 1 ? 's' : ''} in daily quest
                 </span>
               )}
-              {dailyWordIds.length > 0 && selectedExerciseWordIds.size > 0 && <span className="text-gray-400 mx-2">·</span>}
-              {selectedExerciseWordIds.size > 0 && (
+              {dailyWordIds.length > 0 && writingExerciseWordIds.length > 0 && <span className="text-gray-400 mx-2">·</span>}
+              {writingExerciseWordIds.length > 0 && (
                 <span className="text-teal-900">
-                  {selectedExerciseWordIds.size} word{selectedExerciseWordIds.size !== 1 ? 's' : ''} for writing exercises
+                  {writingExerciseWordIds.length} word{writingExerciseWordIds.length !== 1 ? 's' : ''} for writing exercises
                   {' · '}
                   <button
                     type="button"
                     className="underline hover:text-teal-950 font-black"
-                    onClick={() => setSelectedExerciseWordIds(new Set())}
+                    onClick={() => onWritingExerciseWordIdsChange([])}
                   >
                     Clear writing selection
                   </button>
@@ -1281,6 +1394,86 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
               )}
             </p>
           )}
+
+          {/* Past writing exercises (assigned to this student) */}
+          <div className="rounded-2xl border-2 border-sky-200 bg-sky-50/60 p-5 mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <h4 className="text-xs font-black uppercase tracking-widest text-sky-900 flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
+                Past writing exercises
+              </h4>
+              {studentId.startsWith('temp-') && (
+                <span className="text-xs font-bold text-sky-800/80">Add the student in Supabase to track history.</span>
+              )}
+              {!studentId.startsWith('temp-') && pastWritingLoading && (
+                <span className="text-xs font-bold text-sky-700">Loading…</span>
+              )}
+            </div>
+            {!studentId.startsWith('temp-') && pastWritingByDate.length === 0 && !pastWritingLoading && (
+              <p className="text-sm font-medium text-sky-900/80">
+                Nothing sent yet. Generate from <span className="font-black">Writing exercises</span> and assign to {studentName}&apos;s dashboard.
+              </p>
+            )}
+            {!studentId.startsWith('temp-') && pastWritingByDate.length > 0 && (
+              <div className="space-y-4 max-h-72 overflow-y-auto pr-1">
+                {pastWritingByDate.map(([dateKey, rows]) => {
+                  const heading = londonDateHeading(rows[0]?.created_at);
+                  return (
+                    <div key={dateKey}>
+                      <p className="text-xs font-black text-sky-950 uppercase tracking-wide mb-2 border-b border-sky-200/80 pb-1">
+                        {heading}
+                        <span className="ml-2 font-mono text-[10px] text-sky-700/90 normal-case">({dateKey})</span>
+                      </p>
+                      <ul className="space-y-1.5">
+                        {rows.map(a => {
+                          const wordEntry = a.word_id ? wordBank.find(w => w.id === a.word_id) : undefined;
+                          const wordLabel = wordEntry ? formatWordForDisplay(wordEntry.word) : '—';
+                          const typeLabel =
+                            getWritingExerciseMeta(a.exercise_type || '')?.label ?? a.title ?? 'Writing exercise';
+                          const timeStr = a.created_at
+                            ? new Date(a.created_at).toLocaleTimeString('en-GB', {
+                                timeZone: 'Europe/London',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                            : '';
+                          return (
+                            <li
+                              key={a.id}
+                              className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm bg-white/80 rounded-xl px-3 py-2 border border-sky-100"
+                            >
+                              <span className="font-black text-gray-900 min-w-[6rem]">{wordLabel}</span>
+                              <span className="font-bold text-sky-900">{typeLabel}</span>
+                              {timeStr && (
+                                <span className="text-xs font-bold text-gray-500 ml-auto">{timeStr}</span>
+                              )}
+                              <span
+                                className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-lg ${
+                                  a.completed_at
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-amber-100 text-amber-900'
+                                }`}
+                              >
+                                {a.completed_at ? 'Done' : 'Outstanding'}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {!studentId.startsWith('temp-') &&
+              pastWritingByDate.some(([, rows]) => rows.some(a => !a.word_id)) && (
+                <p className="text-[11px] font-medium text-sky-800/70 mt-3">
+                  Dates use UK time (Europe/London). “—” in the word column is for older assignments; run{' '}
+                  <code className="font-mono bg-white/70 px-1 rounded text-[10px]">supabase_student_assignments_word_id.sql</code>{' '}
+                  and new ones will show the vocabulary word.
+                </p>
+              )}
+          </div>
 
           {/* Filter Controls */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -1435,7 +1628,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                     <td className="pr-1 py-5 align-top text-center">
                       <input
                         type="checkbox"
-                        checked={selectedExerciseWordIds.has(w.id)}
+                        checked={writingExerciseWordIds.includes(w.id)}
                         onChange={() => toggleExerciseWordSelection(w.id)}
                         className="w-4 h-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500 cursor-pointer mt-1"
                         aria-label={`Select ${w.word} for writing exercises`}
@@ -1865,6 +2058,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
         selectedWords={selectedWordsForExercises}
         assignStudentId={studentId}
         assignStudentName={studentName}
+        onAssigned={refreshPastWritingAssignments}
       />
     </div>
   );

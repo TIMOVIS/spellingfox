@@ -6,7 +6,7 @@ import StudentNameEntry from './components/StudentNameEntry';
 import TutorDashboard from './components/TutorDashboard';
 import StudentSelector from './components/StudentSelector';
 import Navbar from './components/Navbar';
-import { toggleDailyQuestWord, assignWordsToDailyQuest, addStudent as addStudentToSupabase, deleteStudent as deleteStudentFromSupabase, getAllStudents, getStudentProgress, getDailyQuestWordIds, getStudent, addPointsToStudent, savePracticeRecords } from './lib/supabaseQueries';
+import { toggleDailyQuestWord, assignWordsToDailyQuest, addStudent as addStudentToSupabase, deleteStudent as deleteStudentFromSupabase, getAllStudents, getStudentProgress, getDailyQuestWordIds, getStudentWritingWordIds, replaceStudentWritingWords, addPointsToStudent, savePracticeRecords } from './lib/supabaseQueries';
 import type { WordPracticeResult, PracticeActivityType } from './lib/supabaseQueries';
 import { getAllWords } from './lib/supabaseQueries';
 import { supabase } from './lib/supabase';
@@ -82,16 +82,20 @@ const App: React.FC = () => {
         // Load progress and daily quests for each student
         const studentsData: StudentData[] = await Promise.all(
           vocabStudents.map(async (student) => {
-            const progress = await getStudentProgress(student.id);
-            const dailyWordIds = await getDailyQuestWordIds(student.id);
-            
+            const [progress, dailyWordIds, writingWordIds] = await Promise.all([
+              getStudentProgress(student.id),
+              getDailyQuestWordIds(student.id),
+              getStudentWritingWordIds(student.id)
+            ]);
+
             return {
               id: student.id,
               name: student.name,
               points: progress?.points || 0,
               streak: progress?.streak || 0,
-              wordBank: wordEntries, // All students share the same word bank
-              dailyWordIds: dailyWordIds
+              wordBank: wordEntries,
+              dailyWordIds,
+              writingWordIds
             };
           })
         );
@@ -336,7 +340,8 @@ const App: React.FC = () => {
         points: 0,
         streak: 0,
         wordBank: wordEntries,
-        dailyWordIds: []
+        dailyWordIds: [],
+        writingWordIds: []
       };
       
       // Update local state
@@ -353,7 +358,8 @@ const App: React.FC = () => {
         points: 0,
         streak: 0,
         wordBank: [],
-        dailyWordIds: []
+        dailyWordIds: [],
+        writingWordIds: []
       };
       setState(prev => ({
         ...prev,
@@ -369,9 +375,7 @@ const App: React.FC = () => {
       
       // Update local state
       setState(prev => {
-        // If the deleted student was selected, clear the selection
         const newSelectedId = prev.selectedStudentId === studentId ? null : prev.selectedStudentId;
-        
         return {
           ...prev,
           students: prev.students.filter(s => s.id !== studentId),
@@ -380,10 +384,8 @@ const App: React.FC = () => {
       });
     } catch (error) {
       console.error('Failed to delete student from Supabase:', error);
-      // Still remove from local state for immediate feedback
       setState(prev => {
         const newSelectedId = prev.selectedStudentId === studentId ? null : prev.selectedStudentId;
-        
         return {
           ...prev,
           students: prev.students.filter(s => s.id !== studentId),
@@ -566,7 +568,37 @@ const App: React.FC = () => {
             onReplaceDailyQuest={replaceDailyQuestForStudent}
             onUpdateWords={updateWordBank}
             onToggleDaily={toggleDailyWord}
-            onRefetchDailyQuest={refetchSelectedStudentDailyQuest}
+                       onRefetchDailyQuest={refetchSelectedStudentDailyQuest}
+            writingExerciseWordIds={getSelectedStudent()?.writingWordIds ?? []}
+            onWritingExerciseWordIdsChange={async (ids: string[]) => {
+              const selected = getSelectedStudent();
+              if (!selected) return;
+              const sid = selected.id;
+              const unique: string[] = [...new Set(ids)];
+              setState(prev => ({
+                ...prev,
+                students: prev.students.map(s =>
+                  s.id === sid ? { ...s, writingWordIds: unique } : s
+                )
+              }));
+              if (sid.startsWith('temp-')) return;
+              try {
+                await replaceStudentWritingWords(sid, unique);
+              } catch (e) {
+                console.error('Failed to save writing exercise words:', e);
+                try {
+                  const refetched = await getStudentWritingWordIds(sid);
+                  setState(prev => ({
+                    ...prev,
+                    students: prev.students.map(s =>
+                      s.id === sid ? { ...s, writingWordIds: refetched } : s
+                    )
+                  }));
+                } catch (refetchErr) {
+                  console.error('Failed to refetch writing words:', refetchErr);
+                }
+              }
+            }}
             onBack={() => setState(prev => ({ ...prev, selectedStudentId: null }))}
           />
         ) : (

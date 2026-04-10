@@ -1,9 +1,68 @@
 import React, { useState, useCallback } from 'react';
 import type { WordEntry } from '../types';
-import { WRITING_EXERCISE_TYPES, getWritingExerciseMeta } from '../lib/writingExerciseTypes';
-import { generateWritingExercises, type GeneratedWritingExerciseItem } from '../geminiService';
+import { WRITING_EXERCISE_TYPES, WRITING_EXERCISE_TYPE_IDS, getWritingExerciseMeta } from '../lib/writingExerciseTypes';
+import {
+  generateWritingExercises,
+  type GeneratedWritingExerciseItem,
+  type PriorWritingExercisesByWordAndType,
+} from '../geminiService';
 import { formatWordForDisplay } from '../lib/wordDisplay';
-import { insertStudentAssignments } from '../lib/supabaseQueries';
+import { insertStudentAssignments, getStudentAssignments } from '../lib/supabaseQueries';
+import type { VocabStudentAssignment } from '../lib/supabase';
+
+const PRIOR_SNIPPET_MAX = 700;
+const PRIOR_VERSIONS_PER_KEY = 3;
+
+/** Build prior worksheet text per word + exercise type (newest first, capped) for de-duplicating prompts. */
+function buildPriorWritingByWordAndType(rows: VocabStudentAssignment[]): PriorWritingExercisesByWordAndType | undefined {
+  type Entry = { created: number; text: string };
+  const acc: Record<string, Record<string, Entry[]>> = {};
+  for (const a of rows) {
+    if (!a.word_id || !a.exercise_type?.trim()) continue;
+    const et = a.exercise_type.trim();
+    if (!WRITING_EXERCISE_TYPE_IDS.includes(et as (typeof WRITING_EXERCISE_TYPE_IDS)[number])) continue;
+    const main = (a.main_content || '').trim();
+    const instr = (a.student_instructions || '').trim();
+    const opts =
+      Array.isArray(a.options) && a.options.length > 0 ? `Options: ${a.options.join(' | ')}` : '';
+    const blob = [main, instr, opts].filter(Boolean).join('\n');
+    if (!blob) continue;
+    const created = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const truncated =
+      blob.length > PRIOR_SNIPPET_MAX ? `${blob.slice(0, PRIOR_SNIPPET_MAX - 1)}…` : blob;
+    const wid = a.word_id;
+    if (!acc[wid]) acc[wid] = {};
+    if (!acc[wid][et]) acc[wid][et] = [];
+    acc[wid][et].push({ created, text: truncated });
+  }
+  const out: PriorWritingExercisesByWordAndType = {};
+  let any = false;
+  for (const wid of Object.keys(acc)) {
+    out[wid] = {};
+    for (const et of Object.keys(acc[wid])) {
+      const list = acc[wid][et]
+        .sort((x, y) => y.created - x.created)
+        .slice(0, PRIOR_VERSIONS_PER_KEY)
+        .map((x) => x.text);
+      if (list.length) {
+        out[wid][et] = list;
+        any = true;
+      }
+    }
+    if (Object.keys(out[wid]).length === 0) delete out[wid];
+  }
+  return any ? out : undefined;
+}
+
+function matchWordIdFromFocus(focusWord: string | undefined, words: WordEntry[]): string | null {
+  if (!focusWord?.trim()) return null;
+  const t = focusWord.trim().toLowerCase();
+  for (const w of words) {
+    if (w.word.trim().toLowerCase() === t) return w.id;
+    if (formatWordForDisplay(w.word).toLowerCase() === t) return w.id;
+  }
+  return null;
+}
 
 const MAX_WORDS = 12;
 
@@ -59,7 +118,16 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
     setError(null);
     setItems(null);
     try {
-      const result = await generateWritingExercises(words, ids);
+      let priorByWordAndType: PriorWritingExercisesByWordAndType | undefined;
+      if (assignStudentId && !assignStudentId.startsWith('temp-')) {
+        try {
+          const rows = await getStudentAssignments(assignStudentId);
+          priorByWordAndType = buildPriorWritingByWordAndType(rows);
+        } catch {
+          priorByWordAndType = undefined;
+        }
+      }
+      const result = await generateWritingExercises(words, ids, priorByWordAndType);
       setItems(result);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to generate exercises.');
@@ -80,6 +148,7 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
       await insertStudentAssignments(
         assignStudentId,
         items.map((item, i) => ({
+          word_id: matchWordIdFromFocus(item.focusWord, selectedWords),
           exercise_type: item.exerciseType,
           title: item.title?.trim() || getWritingExerciseMeta(item.exerciseType)?.label || 'Writing exercise',
           student_instructions: item.studentInstructions,
@@ -162,7 +231,7 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
           <div>
             <h2 className="text-xl font-black text-gray-900 tracking-tight">Writing exercises</h2>
             <p className="text-xs text-gray-600 font-medium mt-0.5">
-              From selected vocabulary · British English · printable
+              One exercise per selected word · British English · printable. Multiple types rotate across words.
             </p>
           </div>
           <button
@@ -208,7 +277,9 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
 
               <div className="no-print">
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <p className="text-xs font-black text-gray-500 uppercase tracking-widest">Exercise types</p>
+                  <p className="text-xs font-black text-gray-500 uppercase tracking-widest">
+                    Exercise types (cycle: 1st word → 1st ticked type, 2nd word → 2nd, …)
+                  </p>
                   <div className="flex gap-2">
                     <button
                       type="button"
@@ -308,17 +379,22 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
               <header className="border-b-2 border-gray-200 pb-4 print:border-gray-400">
                 <h1 className="text-2xl font-black text-gray-900 print:text-black">Writing worksheet</h1>
                 <p className="text-sm text-gray-600 mt-1 print:text-gray-800">
-                  Words: {wordsForGen.map(w => formatWordForDisplay(w.word)).join(', ')}
+                  {items.length} exercise{items.length !== 1 ? 's' : ''} (one per word):{' '}
+                  {wordsForGen.map(w => formatWordForDisplay(w.word)).join(', ')}
                 </p>
               </header>
 
               {items.map((item, idx) => {
                 const meta = getWritingExerciseMeta(item.exerciseType);
+                const focus = item.focusWord || wordsForGen[idx]?.word || '';
                 return (
                   <article
-                    key={`${item.exerciseType}-${idx}`}
+                    key={`${focus}-${item.exerciseType}-${idx}`}
                     className="break-inside-avoid border-2 border-gray-100 rounded-2xl p-5 print:border-gray-300 print:rounded-none"
                   >
+                    <p className="text-xs font-black text-emerald-700 uppercase tracking-widest mb-1 print:text-black">
+                      Word: {formatWordForDisplay(focus)}
+                    </p>
                     <h3 className="text-lg font-black text-emerald-900 print:text-black">
                       {idx + 1}. {meta?.label ?? item.title}
                     </h3>

@@ -2,6 +2,7 @@
 CREATE TABLE IF NOT EXISTS vocab_student_assignments (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     student_id UUID NOT NULL REFERENCES vocab_students(id) ON DELETE CASCADE,
+    word_id UUID REFERENCES vocab_words(id) ON DELETE SET NULL,
     exercise_type TEXT,
     title TEXT NOT NULL,
     student_instructions TEXT NOT NULL DEFAULT '',
@@ -14,6 +15,7 @@ CREATE TABLE IF NOT EXISTS vocab_student_assignments (
 
 CREATE INDEX IF NOT EXISTS idx_vocab_student_assignments_student_id ON vocab_student_assignments(student_id);
 CREATE INDEX IF NOT EXISTS idx_vocab_student_assignments_completed ON vocab_student_assignments(student_id, completed_at);
+CREATE INDEX IF NOT EXISTS idx_vocab_student_assignments_student_created ON vocab_student_assignments(student_id, created_at DESC);
 
 ALTER TABLE vocab_student_assignments ENABLE ROW LEVEL SECURITY;
 

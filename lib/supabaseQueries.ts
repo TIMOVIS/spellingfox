@@ -352,6 +352,39 @@ export const markDailyQuestCompleted = async (
 };
 
 // ============================================
+// WRITING EXERCISE WORD SELECTION (per student, persistent)
+// ============================================
+
+export const getStudentWritingWordIds = async (studentId: string): Promise<string[]> => {
+  const { data, error } = await supabase
+    .from('vocab_student_writing_words')
+    .select('word_id, sort_order, assigned_at')
+    .eq('student_id', studentId)
+    .order('sort_order', { ascending: true })
+    .order('assigned_at', { ascending: true });
+  if (error) throw error;
+  return (data || []).map((r: { word_id: string }) => r.word_id);
+};
+
+/** Replace the full writing-exercise word list for a student (order preserved). */
+export const replaceStudentWritingWords = async (studentId: string, wordIds: string[]): Promise<void> => {
+  const unique = [...new Set(wordIds)];
+  const { error: delErr } = await supabase
+    .from('vocab_student_writing_words')
+    .delete()
+    .eq('student_id', studentId);
+  if (delErr) throw delErr;
+  if (unique.length === 0) return;
+  const rows = unique.map((word_id, sort_order) => ({
+    student_id: studentId,
+    word_id,
+    sort_order,
+  }));
+  const { error: insErr } = await supabase.from('vocab_student_writing_words').insert(rows);
+  if (insErr) throw insErr;
+};
+
+// ============================================
 // PRACTICE RECORDS (student history: which day, which words, right/wrong)
 // ============================================
 
@@ -426,6 +459,7 @@ export const getStudentAssignments = async (studentId: string): Promise<VocabStu
 };
 
 export interface NewStudentAssignmentRow {
+  word_id?: string | null;
   exercise_type?: string | null;
   title: string;
   student_instructions: string;
@@ -441,6 +475,7 @@ export const insertStudentAssignments = async (
   if (items.length === 0) return;
   const rows = items.map((item, i) => ({
     student_id: studentId,
+    word_id: item.word_id ?? null,
     exercise_type: item.exercise_type ?? null,
     title: (item.title ?? 'Writing exercise').trim() || 'Writing exercise',
     student_instructions: item.student_instructions?.trim() ?? '',
