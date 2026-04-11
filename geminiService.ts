@@ -23,7 +23,13 @@ async function callGeminiServer<T>(action: string, payload: Record<string, unkno
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
+    const baseMsg = (err as { error?: string }).error || res.statusText;
+    if (res.status === 504 || res.status === 502) {
+      throw new Error(
+        `${baseMsg} (gateway timeout). The AI step took too long for one request — try again, or select fewer words at once.`
+      );
+    }
+    throw new Error(baseMsg);
   }
   return res.json();
 }
@@ -303,6 +309,29 @@ export interface GeneratedWritingExerciseItem {
 const MAX_WORDS_FOR_WRITING_EXERCISES = 12;
 
 /**
+ * Fewer exercises per Gemini call so Netlify serverless stays under gateway timeouts (~10s free / ~26s Pro).
+ * Multiple chunks run sequentially (extra round-trips in prod, each completes faster).
+ */
+/** Exported for UI copy; keep in sync with chunking in `generateWritingExercises`. */
+export const WRITING_EX_GEN_CHUNK_SIZE = 4;
+
+type WritingExercisePlanRow = {
+  word: Pick<WordEntry, "id" | "word" | "definition" | "example" | "yearGroup">;
+  typeId: (typeof WRITING_EXERCISE_TYPE_IDS)[number];
+};
+
+function buildWritingExercisePlan(
+  words: Pick<WordEntry, "id" | "word" | "definition" | "example" | "yearGroup">[],
+  ids: string[],
+  globalWordOffset: number
+): WritingExercisePlanRow[] {
+  return words.map((w, i) => ({
+    word: w,
+    typeId: ids[(globalWordOffset + i) % ids.length] as (typeof WRITING_EXERCISE_TYPE_IDS)[number],
+  }));
+}
+
+/**
  * Prior worksheet text for this pupil: wordId → exerciseTypeId → snippets from past assignments
  * (so the model can generate new sentences/tasks, not duplicates).
  */
@@ -322,28 +351,17 @@ function priorTasksBlurb(
 }
 
 /**
- * Generate teacher-ready writing exercises anchored on selected vocabulary.
- * @param priorByWordAndType Optional past assignment snippets per word + exercise type (avoids duplicate worksheet text for the same pupil).
+ * One Gemini / serverless call for a small plan (≤ WRITING_EX_GEN_CHUNK_SIZE items in practice when chunked).
  */
-export const generateWritingExercises = async (
-  words: Pick<WordEntry, "id" | "word" | "definition" | "example" | "yearGroup">[],
-  exerciseTypeIds: string[],
-  priorByWordAndType?: PriorWritingExercisesByWordAndType
-): Promise<GeneratedWritingExerciseItem[]> => {
-  const trimmedWords = words.slice(0, MAX_WORDS_FOR_WRITING_EXERCISES);
-  if (trimmedWords.length === 0) {
+async function runSingleWritingExercisePlan(
+  plan: WritingExercisePlanRow[],
+  ids: string[],
+  priorByWordAndType: PriorWritingExercisesByWordAndType | undefined,
+  globalWordOffset: number
+): Promise<GeneratedWritingExerciseItem[]> {
+  if (plan.length === 0) {
     throw new Error("Select at least one word from the word bank.");
   }
-  const ids = [...new Set(exerciseTypeIds)].filter(id => WRITING_EXERCISE_TYPE_IDS.includes(id as (typeof WRITING_EXERCISE_TYPE_IDS)[number]));
-  if (ids.length === 0) {
-    throw new Error("Choose at least one exercise type.");
-  }
-
-  /** One exercise per word; cycle through selected types so different words get different kinds when the teacher picks several. */
-  const plan = trimmedWords.map((w, i) => ({
-    word: w,
-    typeId: ids[i % ids.length] as (typeof WRITING_EXERCISE_TYPE_IDS)[number],
-  }));
 
   const typeLines = ids
     .map(id => {
@@ -399,8 +417,9 @@ Return a JSON array only, length ${n}.`;
 
   if (!apiKey || !ai) {
     return callGeminiServer<GeneratedWritingExerciseItem[]>("writingExercises", {
-      words: trimmedWords,
+      words: plan.map(p => p.word),
       exerciseTypeIds: ids,
+      globalWordOffset,
       ...(priorByWordAndType && Object.keys(priorByWordAndType).length > 0
         ? { priorByWordAndType }
         : {}),
@@ -480,6 +499,42 @@ Return a JSON array only, length ${n}.`;
     });
   }
   return normalized;
+}
+
+/**
+ * Generate teacher-ready writing exercises anchored on selected vocabulary.
+ * @param priorByWordAndType Optional past assignment snippets per word + exercise type (avoids duplicate worksheet text for the same pupil).
+ * @param globalWordOffset Internal: index of the first word in `words` within the full teacher selection (preserves exercise-type rotation across chunks).
+ */
+export const generateWritingExercises = async (
+  words: Pick<WordEntry, "id" | "word" | "definition" | "example" | "yearGroup">[],
+  exerciseTypeIds: string[],
+  priorByWordAndType?: PriorWritingExercisesByWordAndType,
+  globalWordOffset = 0
+): Promise<GeneratedWritingExerciseItem[]> => {
+  const trimmedWords = words.slice(0, MAX_WORDS_FOR_WRITING_EXERCISES);
+  if (trimmedWords.length === 0) {
+    throw new Error("Select at least one word from the word bank.");
+  }
+  const ids = [...new Set(exerciseTypeIds)].filter(id => WRITING_EXERCISE_TYPE_IDS.includes(id as (typeof WRITING_EXERCISE_TYPE_IDS)[number]));
+  if (ids.length === 0) {
+    throw new Error("Choose at least one exercise type.");
+  }
+
+  const chunk = WRITING_EX_GEN_CHUNK_SIZE;
+  if (trimmedWords.length <= chunk) {
+    const plan = buildWritingExercisePlan(trimmedWords, ids, globalWordOffset);
+    return runSingleWritingExercisePlan(plan, ids, priorByWordAndType, globalWordOffset);
+  }
+
+  const merged: GeneratedWritingExerciseItem[] = [];
+  for (let i = 0; i < trimmedWords.length; i += chunk) {
+    const slice = trimmedWords.slice(i, i + chunk);
+    const offset = globalWordOffset + i;
+    const plan = buildWritingExercisePlan(slice, ids, offset);
+    merged.push(...(await runSingleWritingExercisePlan(plan, ids, priorByWordAndType, offset)));
+  }
+  return merged;
 };
 
 export const generateQuizQuestions = async (words: string[]) => {

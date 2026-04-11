@@ -1251,6 +1251,50 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
         </div>
       )}
 
+      {/* Writing exercise words – same pattern as Today’s Daily Quest (teal = writing checkboxes) */}
+      {writingExerciseWordIds.length > 0 && (
+        <div className="bg-teal-50 border-2 border-teal-200 rounded-[2rem] p-6 shadow-sm">
+          <h3 className="font-black text-teal-900 uppercase text-xs tracking-widest flex items-center gap-2 mb-3">
+            <span className="text-lg">📝</span> Writing exercise words
+            <span className="bg-teal-200 text-teal-900 px-2.5 py-0.5 rounded-full text-[10px] font-black">
+              {writingExerciseWordIds.length} word{writingExerciseWordIds.length !== 1 ? 's' : ''}
+            </span>
+          </h3>
+          <p className="text-teal-800/80 text-sm font-medium mb-3">
+            Words {studentName} has ticked for <span className="font-black">Writing exercises</span> (teal checkboxes
+            below). Tap a word to unpin it from this list.
+          </p>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {wordBank
+              .filter(w => writingExerciseWordIds.includes(w.id))
+              .map(w => (
+                <button
+                  key={w.id}
+                  type="button"
+                  onClick={() => onWritingExerciseWordIdsChange(writingExerciseWordIds.filter(id => id !== w.id))}
+                  className="inline-flex items-center gap-2 bg-white border-2 border-teal-300 text-teal-900 px-4 py-2 rounded-xl text-sm font-black shadow-sm hover:bg-teal-100 hover:border-teal-400 active:scale-95 transition-all"
+                >
+                  <span>{formatWordForDisplay(w.word)}</span>
+                  <span className="text-[10px] uppercase tracking-widest text-teal-600">Unpin</span>
+                </button>
+              ))}
+          </div>
+          {writingExerciseWordIds.some(id => !wordBank.some(w => w.id === id)) && (
+            <p className="text-xs font-bold text-teal-900/90 mb-3">
+              Some pinned IDs are not in the word bank anymore (removed words). Use &quot;Clear all&quot; to reset the
+              list.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => onWritingExerciseWordIdsChange([])}
+            className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2.5 rounded-xl font-black text-sm shadow-sm transition-colors"
+          >
+            Clear all writing words
+          </button>
+        </div>
+      )}
+
       {/* Bulk assign daily quest modal */}
       {showBulkAssignModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1440,9 +1484,10 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                 </select>
                 {!selectedPastWritingDate && (
                   <p className="text-sm text-gray-600 mb-4 font-medium">
-                    After you pick a date, each exercise expands with the{' '}
-                    <span className="font-black text-gray-800">student’s online response</span> (choice and/or written
-                    answer) when they submitted one.
+                    After you pick a date, you&apos;ll see the{' '}
+                    <span className="font-black text-gray-800">task text and instructions</span> the pupil was given,
+                    then their <span className="font-black text-gray-800">draft or submitted answer</span> when
+                    present.
                   </p>
                 )}
                 {selectedPastWritingDate &&
@@ -1523,6 +1568,13 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                                   const hasOnline = !!(resp.choiceText || resp.freeText);
                                   const draft = parseStudentWritingDraft(a);
                                   const hasDraft = onlineAnswerPresent(draft);
+                                  const taskTitle = (a.title || '').trim();
+                                  const taskInstr = (a.student_instructions || '').trim();
+                                  const taskMain = (a.main_content || '').trim();
+                                  const taskOptions = Array.isArray(a.options)
+                                    ? a.options.filter((o): o is string => typeof o === 'string' && o.trim())
+                                    : [];
+                                  const hasTaskBody = !!(taskTitle || taskInstr || taskMain || taskOptions.length);
                                   return (
                                     <li
                                       key={a.id}
@@ -1545,6 +1597,61 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
                                         >
                                           {a.completed_at ? 'Done' : hasDraft ? 'In progress' : 'Outstanding'}
                                         </span>
+                                      </div>
+                                      <div className="rounded-xl bg-slate-50 border-2 border-slate-200/90 px-3 py-3 space-y-3">
+                                        <div className="text-[10px] font-black text-slate-700 uppercase tracking-widest">
+                                          Task (what the pupil saw)
+                                        </div>
+                                        {!hasTaskBody && (
+                                          <p className="text-xs font-medium text-slate-500">
+                                            No task text or choices stored for this row.
+                                          </p>
+                                        )}
+                                        {taskTitle ? (
+                                          <div>
+                                            <span className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
+                                              Title
+                                            </span>
+                                            <p className="text-sm font-bold text-slate-900">{taskTitle}</p>
+                                          </div>
+                                        ) : null}
+                                        {taskInstr ? (
+                                          <div>
+                                            <span className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
+                                              Instructions
+                                            </span>
+                                            <p className="text-sm font-medium text-slate-900 whitespace-pre-wrap leading-relaxed">
+                                              {taskInstr}
+                                            </p>
+                                          </div>
+                                        ) : null}
+                                        {taskMain ? (
+                                          <div>
+                                            <span className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
+                                              Worksheet / prompt
+                                            </span>
+                                            <p className="text-sm font-medium text-slate-900 whitespace-pre-wrap leading-relaxed">
+                                              {taskMain}
+                                            </p>
+                                          </div>
+                                        ) : null}
+                                        {taskOptions.length > 0 ? (
+                                          <div>
+                                            <span className="text-[10px] font-black uppercase text-slate-500 block mb-1">
+                                              Answer choices (online)
+                                            </span>
+                                            <ul className="list-none space-y-1.5 text-sm font-medium text-slate-900">
+                                              {taskOptions.map((opt, oi) => (
+                                                <li key={oi} className="flex gap-2">
+                                                  <span className="shrink-0 font-black text-slate-500 w-6">
+                                                    {String.fromCharCode(65 + oi)}.
+                                                  </span>
+                                                  <span className="whitespace-pre-wrap leading-relaxed">{opt}</span>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          </div>
+                                        ) : null}
                                       </div>
                                       {!a.completed_at && hasDraft && (
                                         <div className="rounded-xl bg-sky-50/90 border-2 border-sky-200/80 px-3 py-3 space-y-2">
@@ -1711,15 +1818,9 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
               {dailyWordIds.length > 0 && writingExerciseWordIds.length > 0 && <span className="text-gray-400 mx-2">·</span>}
               {writingExerciseWordIds.length > 0 && (
                 <span className="text-teal-900">
-                  {writingExerciseWordIds.length} word{writingExerciseWordIds.length !== 1 ? 's' : ''} for writing exercises
-                  {' · '}
-                  <button
-                    type="button"
-                    className="underline hover:text-teal-950 font-black"
-                    onClick={() => onWritingExerciseWordIdsChange([])}
-                  >
-                    Clear writing selection
-                  </button>
+                  {writingExerciseWordIds.length} word{writingExerciseWordIds.length !== 1 ? 's' : ''} for writing
+                  exercises — use the <span className="font-black">Writing exercise words</span> panel (same layout as
+                  Today&apos;s Daily Quest) to unpin or clear all.
                 </span>
               )}
             </p>

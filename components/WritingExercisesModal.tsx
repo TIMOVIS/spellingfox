@@ -3,6 +3,7 @@ import type { WordEntry } from '../types';
 import { WRITING_EXERCISE_TYPES, WRITING_EXERCISE_TYPE_IDS, getWritingExerciseMeta } from '../lib/writingExerciseTypes';
 import {
   generateWritingExercises,
+  WRITING_EX_GEN_CHUNK_SIZE,
   type GeneratedWritingExerciseItem,
   type PriorWritingExercisesByWordAndType,
 } from '../geminiService';
@@ -327,6 +328,12 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
                 </div>
               )}
 
+              {wordsForGen.length > WRITING_EX_GEN_CHUNK_SIZE && (
+                <p className="no-print text-xs font-medium text-gray-600">
+                  Many words are generated in a few batches (each under the hosting time limit), so this may take a
+                  little longer than a single-word run.
+                </p>
+              )}
               <div className="no-print flex flex-wrap gap-3 pt-2">
                 <button
                   type="button"

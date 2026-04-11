@@ -61,10 +61,18 @@ export const handler = async (event: { httpMethod: string; body: string | null }
           !Array.isArray(body.priorByWordAndType)
             ? (body.priorByWordAndType as Record<string, Record<string, string[]>>)
             : undefined;
+        const rawOff = body.globalWordOffset;
+        const globalWordOffset =
+          typeof rawOff === 'number' && Number.isFinite(rawOff) ? Math.max(0, Math.floor(rawOff)) : 0;
         if (!Array.isArray(words) || !Array.isArray(exerciseTypeIds)) {
           return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing words or exerciseTypeIds' }) };
         }
-        const result = await gemini.generateWritingExercises(words, exerciseTypeIds, priorByWordAndType);
+        const result = await gemini.generateWritingExercises(
+          words,
+          exerciseTypeIds,
+          priorByWordAndType,
+          globalWordOffset
+        );
         return { statusCode: 200, headers, body: JSON.stringify(result) };
       }
       default:
