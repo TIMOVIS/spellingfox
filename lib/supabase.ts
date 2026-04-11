@@ -86,10 +86,18 @@ export interface VocabPracticeRecord {
   created_at?: string;
 }
 
+/** Stored in `student_response` JSONB on vocab_student_assignments */
+export interface StudentAssignmentResponse {
+  text?: string;
+  selectedOptionIndex?: number;
+}
+
 /** Writing / task sheet assigned by teacher to one student */
 export interface VocabStudentAssignment {
   id: string;
   student_id: string;
+  /** Same id for all rows in one teacher assign batch (student sees one pack). */
+  batch_id?: string | null;
   /** Vocabulary word this exercise was generated for (omitted on legacy rows / old DB). */
   word_id?: string | null;
   exercise_type: string | null;
@@ -99,5 +107,9 @@ export interface VocabStudentAssignment {
   options: string[];
   sort_order: number;
   completed_at: string | null;
+  /** Student online submission: free text and/or multiple-choice index. */
+  student_response?: StudentAssignmentResponse | null;
+  /** Autosaved partial answer before submit (same shape as student_response). */
+  student_draft?: StudentAssignmentResponse | null;
   created_at?: string;
 }

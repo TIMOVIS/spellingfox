@@ -66,15 +66,99 @@ function londonCalendarDateKey(iso: string | undefined): string {
   return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
 }
 
-function londonDateHeading(iso: string | undefined): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('en-GB', {
-    timeZone: 'Europe/London',
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
+/** JSONB sometimes arrives already parsed or as a string depending on client version. */
+function normalizeAssignmentStudentResponse(raw: unknown): Record<string, unknown> | null {
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    try {
+      const o = JSON.parse(raw) as unknown;
+      return typeof o === 'object' && o !== null ? (o as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof raw === 'object') return raw as Record<string, unknown>;
+  return null;
+}
+
+/** Parsed online submission for display in Past writing exercises. */
+function parseStudentWritingResponse(a: VocabStudentAssignment): {
+  choiceLetter?: string;
+  choiceText?: string;
+  freeText?: string;
+} {
+  const r = normalizeAssignmentStudentResponse(a.student_response);
+  return shapeResponseForDisplay(a, r);
+}
+
+function shapeResponseForDisplay(
+  a: VocabStudentAssignment,
+  r: Record<string, unknown> | null
+): { choiceLetter?: string; choiceText?: string; freeText?: string } {
+  const out: { choiceLetter?: string; choiceText?: string; freeText?: string } = {};
+  if (!r) return out;
+  const idx =
+    typeof r.selectedOptionIndex === 'number' && Number.isFinite(r.selectedOptionIndex)
+      ? r.selectedOptionIndex
+      : null;
+  const opts = a.options || [];
+  if (idx != null && idx >= 0 && opts[idx]) {
+    out.choiceLetter = String.fromCharCode(65 + idx);
+    out.choiceText = opts[idx];
+  }
+  if (typeof r.text === 'string' && r.text.trim()) {
+    out.freeText = r.text.trim();
+  }
+  return out;
+}
+
+/** Autosaved partial work (same shape as submitted response). */
+function parseStudentWritingDraft(a: VocabStudentAssignment): {
+  choiceLetter?: string;
+  choiceText?: string;
+  freeText?: string;
+} {
+  const r = normalizeAssignmentStudentResponse(a.student_draft);
+  return shapeResponseForDisplay(a, r);
+}
+
+function compareAssignmentOrder(a: VocabStudentAssignment, b: VocabStudentAssignment): number {
+  const so = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+  if (so !== 0) return so;
+  const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+  const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+  return ta - tb;
+}
+
+/** All rows on a calendar day, grouped into teacher “packs” (batch_id) or legacy singles. */
+function groupPastWritingRowsByBatch(rows: VocabStudentAssignment[]): VocabStudentAssignment[][] {
+  if (rows.length === 0) return [];
+  const keyOf = (a: VocabStudentAssignment) =>
+    (a.batch_id && String(a.batch_id).trim()) || `solo:${a.id}`;
+  const map = new Map<string, VocabStudentAssignment[]>();
+  for (const a of rows) {
+    const k = keyOf(a);
+    if (!map.has(k)) map.set(k, []);
+    map.get(k)!.push(a);
+  }
+  for (const list of map.values()) {
+    list.sort(compareAssignmentOrder);
+  }
+  return [...map.values()].sort((a, b) => {
+    const ta = a[0]?.created_at ? new Date(a[0].created_at).getTime() : 0;
+    const tb = b[0]?.created_at ? new Date(b[0].created_at).getTime() : 0;
+    return ta - tb;
   });
+}
+
+function isWritingPack(group: VocabStudentAssignment[]): boolean {
+  if (group.length > 1) return true;
+  const bid = group[0]?.batch_id;
+  return !!(bid && String(bid).trim());
+}
+
+function onlineAnswerPresent(p: { choiceText?: string; freeText?: string }): boolean {
+  return !!(p.choiceText || p.freeText);
 }
 
 interface TutorDashboardProps {
@@ -141,25 +225,33 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const [loadingProgress, setLoadingProgress] = useState(false);
   const [pastWritingAssignments, setPastWritingAssignments] = useState<VocabStudentAssignment[]>([]);
   const [pastWritingLoading, setPastWritingLoading] = useState(false);
+  const [pastWritingOpen, setPastWritingOpen] = useState(false);
+  const [selectedPastWritingDate, setSelectedPastWritingDate] = useState<string | null>(null);
 
-  const pastWritingByDate = useMemo(() => {
-    const map = new Map<string, VocabStudentAssignment[]>();
+  const pastWritingDates = useMemo(() => {
+    const keys = new Set<string>();
     for (const a of pastWritingAssignments) {
-      const key = londonCalendarDateKey(a.created_at);
-      if (!key) continue;
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(a);
+      const k = londonCalendarDateKey(a.created_at);
+      if (k) keys.add(k);
     }
-    const entries = [...map.entries()].sort((x, y) => y[0].localeCompare(x[0]));
-    for (const [, rows] of entries) {
-      rows.sort((a, b) => {
+    return [...keys].sort((a, b) => b.localeCompare(a));
+  }, [pastWritingAssignments]);
+
+  const selectedPastWritingRows = useMemo(() => {
+    if (!selectedPastWritingDate) return [];
+    return pastWritingAssignments
+      .filter(a => londonCalendarDateKey(a.created_at) === selectedPastWritingDate)
+      .sort((a, b) => {
         const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
         const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
         return ta - tb;
       });
-    }
-    return entries;
-  }, [pastWritingAssignments]);
+  }, [pastWritingAssignments, selectedPastWritingDate]);
+
+  const selectedPastWritingBatches = useMemo(
+    () => groupPastWritingRowsByBatch(selectedPastWritingRows),
+    [selectedPastWritingRows]
+  );
 
   const refreshPastWritingAssignments = useCallback(() => {
     if (!studentId || studentId.startsWith('temp-')) {
@@ -194,6 +286,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   useEffect(() => {
     setSelectedPastDate(null);
     setPastQuestDetail([]);
+    setSelectedPastWritingDate(null);
   }, [studentId]);
 
   useEffect(() => {
@@ -1306,6 +1399,243 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
         )}
       </div>
 
+      {/* Past writing exercises */}
+      <div className="bg-gray-50 border-2 border-gray-200 rounded-[2rem] overflow-hidden shadow-sm">
+        <button
+          type="button"
+          onClick={() => setPastWritingOpen(prev => !prev)}
+          className="w-full px-6 py-4 flex items-center justify-between gap-3 text-left hover:bg-gray-100 transition-colors"
+        >
+          <h3 className="font-black text-gray-800 uppercase text-xs tracking-widest flex items-center gap-2">
+            <span className="text-lg">📝</span> Past writing exercises
+          </h3>
+          <span className="text-gray-500 font-bold text-sm">{pastWritingOpen ? '▼' : '▶'}</span>
+        </button>
+        {pastWritingOpen && (
+          <div className="px-6 pb-6 pt-0 border-t border-gray-200">
+            {studentId.startsWith('temp-') ? (
+              <p className="text-gray-500 text-sm py-4">
+                Save this student in Supabase to track writing exercise history.
+              </p>
+            ) : pastWritingLoading && pastWritingDates.length === 0 ? (
+              <p className="text-gray-500 text-sm py-4">Loading…</p>
+            ) : pastWritingDates.length === 0 ? (
+              <p className="text-gray-500 text-sm py-4">
+                No writing exercises sent yet. Use <span className="font-black text-gray-700">Writing exercises</span> in the word bank and assign to {studentName}&apos;s dashboard.
+              </p>
+            ) : (
+              <>
+                <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2">Select a date</label>
+                <select
+                  value={selectedPastWritingDate ?? ''}
+                  onChange={e => setSelectedPastWritingDate(e.target.value || null)}
+                  className="bg-white border-2 border-gray-200 rounded-xl px-4 py-2.5 font-bold text-gray-900 text-sm cursor-pointer w-full max-w-xs mb-2"
+                >
+                  <option value="">Choose date…</option>
+                  {pastWritingDates.map(d => (
+                    <option key={d} value={d}>
+                      {formatPastDate(d)}
+                    </option>
+                  ))}
+                </select>
+                {!selectedPastWritingDate && (
+                  <p className="text-sm text-gray-600 mb-4 font-medium">
+                    After you pick a date, each exercise expands with the{' '}
+                    <span className="font-black text-gray-800">student’s online response</span> (choice and/or written
+                    answer) when they submitted one.
+                  </p>
+                )}
+                {selectedPastWritingDate &&
+                  (selectedPastWritingRows.length === 0 ? (
+                    <p className="text-gray-500 text-sm">No exercises for this date.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      <p className="text-gray-600 text-sm font-medium">
+                        {selectedPastWritingBatches.length} batch
+                        {selectedPastWritingBatches.length !== 1 ? 'es' : ''} ·{' '}
+                        {selectedPastWritingRows.length} exercise{selectedPastWritingRows.length !== 1 ? 's' : ''} ·{' '}
+                        {selectedPastWritingRows.filter(a => a.completed_at).length} submitted ·{' '}
+                        {
+                          selectedPastWritingRows.filter(a => {
+                            const p = parseStudentWritingResponse(a);
+                            return !!(p.choiceText || p.freeText);
+                          }).length
+                        }{' '}
+                        with online answer ·{' '}
+                        {
+                          selectedPastWritingRows.filter(
+                            a => !a.completed_at && onlineAnswerPresent(parseStudentWritingDraft(a))
+                          ).length
+                        }{' '}
+                        with draft in progress
+                      </p>
+                      <div className="space-y-4">
+                        {selectedPastWritingBatches.map((group, gi) => {
+                          const pack = isWritingPack(group);
+                          const gDone = group.filter(a => a.completed_at).length;
+                          const gDraft = group.filter(
+                            a => !a.completed_at && onlineAnswerPresent(parseStudentWritingDraft(a))
+                          ).length;
+                          const firstTitle =
+                            group[0]?.title?.trim() ||
+                            getWritingExerciseMeta(group[0]?.exercise_type || '')?.label ||
+                            'Writing exercises';
+                          return (
+                            <div
+                              key={pack ? `pack-${group[0]?.batch_id ?? gi}` : `solo-${group[0]?.id ?? gi}`}
+                              className={
+                                pack
+                                  ? 'rounded-2xl border-2 border-indigo-200/80 bg-indigo-50/40 p-4 space-y-3 shadow-sm'
+                                  : 'space-y-3'
+                              }
+                            >
+                              {pack && (
+                                <div className="flex flex-wrap items-start justify-between gap-2 border-b border-indigo-200/60 pb-3">
+                                  <div>
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-800">
+                                      Exercise pack
+                                    </p>
+                                    <p className="font-black text-gray-900 text-sm mt-0.5">{firstTitle}</p>
+                                    <p className="text-xs font-bold text-indigo-900/80 mt-1">
+                                      Progress: {gDone}/{group.length} submitted
+                                      {gDraft > 0 ? ` · ${gDraft} with autosaved draft` : ''}
+                                      {gDone < group.length && gDraft === 0
+                                        ? ' · rest outstanding (no draft yet)'
+                                        : ''}
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+                              <ul className={`space-y-3 ${pack ? 'pl-0' : ''}`}>
+                                {group.map(a => {
+                                  const wordEntry = a.word_id ? wordBank.find(w => w.id === a.word_id) : undefined;
+                                  const wordLabel = wordEntry ? formatWordForDisplay(wordEntry.word) : '—';
+                                  const typeLabel =
+                                    getWritingExerciseMeta(a.exercise_type || '')?.label ?? a.title ?? 'Writing exercise';
+                                  const timeStr = a.created_at
+                                    ? new Date(a.created_at).toLocaleTimeString('en-GB', {
+                                        timeZone: 'Europe/London',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })
+                                    : '';
+                                  const resp = parseStudentWritingResponse(a);
+                                  const hasOnline = !!(resp.choiceText || resp.freeText);
+                                  const draft = parseStudentWritingDraft(a);
+                                  const hasDraft = onlineAnswerPresent(draft);
+                                  return (
+                                    <li
+                                      key={a.id}
+                                      className="text-sm bg-white rounded-xl px-4 py-3 border-2 border-gray-200 shadow-sm space-y-3"
+                                    >
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                        <span className="font-black text-gray-900 min-w-[5.5rem]">{wordLabel}</span>
+                                        <span className="font-bold text-gray-800 flex-1 min-w-[8rem]">{typeLabel}</span>
+                                        {timeStr && (
+                                          <span className="text-xs font-bold text-gray-500">{timeStr}</span>
+                                        )}
+                                        <span
+                                          className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-lg ${
+                                            a.completed_at
+                                              ? 'bg-emerald-100 text-emerald-800'
+                                              : hasDraft
+                                                ? 'bg-sky-100 text-sky-900'
+                                                : 'bg-amber-100 text-amber-900'
+                                          }`}
+                                        >
+                                          {a.completed_at ? 'Done' : hasDraft ? 'In progress' : 'Outstanding'}
+                                        </span>
+                                      </div>
+                                      {!a.completed_at && hasDraft && (
+                                        <div className="rounded-xl bg-sky-50/90 border-2 border-sky-200/80 px-3 py-3 space-y-2">
+                                          <div className="text-[10px] font-black text-sky-900 uppercase tracking-widest">
+                                            Draft (autosaved, not submitted)
+                                          </div>
+                                          {draft.choiceText != null && (
+                                            <div>
+                                              <span className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
+                                                Selected choice{draft.choiceLetter ? ` (${draft.choiceLetter})` : ''}
+                                              </span>
+                                              <p className="text-sm font-medium text-slate-900 whitespace-pre-wrap">
+                                                {draft.choiceText}
+                                              </p>
+                                            </div>
+                                          )}
+                                          {draft.freeText != null && (
+                                            <div>
+                                              <span className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
+                                                Written answer (partial)
+                                              </span>
+                                              <p className="text-sm font-medium text-slate-900 whitespace-pre-wrap leading-relaxed">
+                                                {draft.freeText}
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+                                      )}
+                                      <div className="rounded-xl bg-emerald-50/90 border-2 border-emerald-200/80 px-3 py-3 space-y-2">
+                                        <div className="text-[10px] font-black text-emerald-900 uppercase tracking-widest">
+                                          Student response (online)
+                                        </div>
+                                        {!a.completed_at && (
+                                          <p className="text-xs font-bold text-amber-900">
+                                            {hasDraft
+                                              ? 'Draft above is not the final submission yet.'
+                                              : 'Not submitted yet — the pupil still has this open on their dashboard.'}
+                                          </p>
+                                        )}
+                                        {a.completed_at && !hasOnline && (
+                                          <p className="text-xs font-medium text-slate-600">
+                                            No online answer stored (e.g. completed before answers were added, or marked
+                                            done without the new form).
+                                          </p>
+                                        )}
+                                        {resp.choiceText != null && (
+                                          <div>
+                                            <span className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
+                                              Selected choice{resp.choiceLetter ? ` (${resp.choiceLetter})` : ''}
+                                            </span>
+                                            <p className="text-sm font-medium text-slate-900 whitespace-pre-wrap">
+                                              {resp.choiceText}
+                                            </p>
+                                          </div>
+                                        )}
+                                        {resp.freeText != null && (
+                                          <div>
+                                            <span className="text-[10px] font-black uppercase text-slate-500 block mb-0.5">
+                                              Written answer
+                                            </span>
+                                            <p className="text-sm font-medium text-slate-900 whitespace-pre-wrap leading-relaxed">
+                                              {resp.freeText}
+                                            </p>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {selectedPastWritingRows.some(a => !a.word_id) && (
+                        <p className="text-[11px] font-medium text-gray-500">
+                          “—” for word means an older assignment without a linked vocabulary word. Run{' '}
+                          <code className="font-mono bg-white px-1 rounded text-[10px] border border-gray-200">
+                            supabase_student_assignments_word_id.sql
+                          </code>{' '}
+                          so new assignments show the word.
+                        </p>
+                      )}
+                    </div>
+                  ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Directory Table */}
       <div className="bg-white rounded-[2.5rem] shadow-sm border border-gray-100 overflow-hidden">
         <div className="px-8 py-6 bg-gray-50/80 border-b">
@@ -1394,86 +1724,6 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
               )}
             </p>
           )}
-
-          {/* Past writing exercises (assigned to this student) */}
-          <div className="rounded-2xl border-2 border-sky-200 bg-sky-50/60 p-5 mb-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-              <h4 className="text-xs font-black uppercase tracking-widest text-sky-900 flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-sky-500" />
-                Past writing exercises
-              </h4>
-              {studentId.startsWith('temp-') && (
-                <span className="text-xs font-bold text-sky-800/80">Add the student in Supabase to track history.</span>
-              )}
-              {!studentId.startsWith('temp-') && pastWritingLoading && (
-                <span className="text-xs font-bold text-sky-700">Loading…</span>
-              )}
-            </div>
-            {!studentId.startsWith('temp-') && pastWritingByDate.length === 0 && !pastWritingLoading && (
-              <p className="text-sm font-medium text-sky-900/80">
-                Nothing sent yet. Generate from <span className="font-black">Writing exercises</span> and assign to {studentName}&apos;s dashboard.
-              </p>
-            )}
-            {!studentId.startsWith('temp-') && pastWritingByDate.length > 0 && (
-              <div className="space-y-4 max-h-72 overflow-y-auto pr-1">
-                {pastWritingByDate.map(([dateKey, rows]) => {
-                  const heading = londonDateHeading(rows[0]?.created_at);
-                  return (
-                    <div key={dateKey}>
-                      <p className="text-xs font-black text-sky-950 uppercase tracking-wide mb-2 border-b border-sky-200/80 pb-1">
-                        {heading}
-                        <span className="ml-2 font-mono text-[10px] text-sky-700/90 normal-case">({dateKey})</span>
-                      </p>
-                      <ul className="space-y-1.5">
-                        {rows.map(a => {
-                          const wordEntry = a.word_id ? wordBank.find(w => w.id === a.word_id) : undefined;
-                          const wordLabel = wordEntry ? formatWordForDisplay(wordEntry.word) : '—';
-                          const typeLabel =
-                            getWritingExerciseMeta(a.exercise_type || '')?.label ?? a.title ?? 'Writing exercise';
-                          const timeStr = a.created_at
-                            ? new Date(a.created_at).toLocaleTimeString('en-GB', {
-                                timeZone: 'Europe/London',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })
-                            : '';
-                          return (
-                            <li
-                              key={a.id}
-                              className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm bg-white/80 rounded-xl px-3 py-2 border border-sky-100"
-                            >
-                              <span className="font-black text-gray-900 min-w-[6rem]">{wordLabel}</span>
-                              <span className="font-bold text-sky-900">{typeLabel}</span>
-                              {timeStr && (
-                                <span className="text-xs font-bold text-gray-500 ml-auto">{timeStr}</span>
-                              )}
-                              <span
-                                className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-lg ${
-                                  a.completed_at
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : 'bg-amber-100 text-amber-900'
-                                }`}
-                              >
-                                {a.completed_at ? 'Done' : 'Outstanding'}
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {!studentId.startsWith('temp-') &&
-              pastWritingByDate.some(([, rows]) => rows.some(a => !a.word_id)) && (
-                <p className="text-[11px] font-medium text-sky-800/70 mt-3">
-                  Dates use UK time (Europe/London). “—” in the word column is for older assignments; run{' '}
-                  <code className="font-mono bg-white/70 px-1 rounded text-[10px]">supabase_student_assignments_word_id.sql</code>{' '}
-                  and new ones will show the vocabulary word.
-                </p>
-              )}
-          </div>
 
           {/* Filter Controls */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">

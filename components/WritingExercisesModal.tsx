@@ -145,6 +145,10 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
     setAssigning(true);
     setAssignMessage(null);
     try {
+      const batchId =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
       await insertStudentAssignments(
         assignStudentId,
         items.map((item, i) => ({
@@ -155,7 +159,8 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
           main_content: item.mainContent,
           options: item.options?.length ? item.options : [],
           sort_order: i,
-        }))
+        })),
+        batchId
       );
       setAssignMessage(`Assigned ${items.length} exercise${items.length !== 1 ? 's' : ''} to ${assignStudentName || 'student'}.`);
       onAssigned?.();

@@ -9,10 +9,11 @@ import {
   getStudentPracticeHistoryByDate,
   getTodayLondonDate,
   getStudentAssignments,
-  markStudentAssignmentComplete,
+  submitStudentAssignmentAnswer,
+  upsertStudentAssignmentDraft,
 } from '../lib/supabaseQueries';
 import type { PracticeActivityType } from '../lib/supabaseQueries';
-import type { VocabStudentAssignment } from '../lib/supabase';
+import type { VocabStudentAssignment, StudentAssignmentResponse } from '../lib/supabase';
 import { formatWordForDisplay } from '../lib/wordDisplay';
 import { getWritingExerciseMeta } from '../lib/writingExerciseTypes';
 import { supabase } from '../lib/supabase';
@@ -29,6 +30,47 @@ interface StudentDashboardProps {
 
 type PracticeDay = { date: string; records: { word_id: string; word: string; activity_type: string; correct: boolean }[] };
 
+function compareAssignmentOrder(a: VocabStudentAssignment, b: VocabStudentAssignment): number {
+  const so = (a.sort_order ?? 0) - (b.sort_order ?? 0);
+  if (so !== 0) return so;
+  const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+  const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+  return ta - tb;
+}
+
+/** Incomplete assignments grouped by batch_id (or one row each if no batch). */
+function groupIncompleteWritingPacks(assignments: VocabStudentAssignment[]): VocabStudentAssignment[][] {
+  const incomplete = assignments.filter(a => !a.completed_at);
+  const groups = new Map<string, VocabStudentAssignment[]>();
+  for (const a of incomplete) {
+    const key = (a.batch_id && String(a.batch_id).trim()) || `solo:${a.id}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(a);
+  }
+  for (const arr of groups.values()) {
+    arr.sort(compareAssignmentOrder);
+  }
+  return [...groups.values()].sort((a, b) => {
+    const tA = a[0]?.created_at ? new Date(a[0].created_at!).getTime() : 0;
+    const tB = b[0]?.created_at ? new Date(b[0].created_at!).getTime() : 0;
+    return tB - tA;
+  });
+}
+
+function normalizeStudentDraftRaw(raw: unknown): StudentAssignmentResponse | null {
+  if (raw == null) return null;
+  if (typeof raw === 'string') {
+    try {
+      const o = JSON.parse(raw) as unknown;
+      return typeof o === 'object' && o !== null ? (o as StudentAssignmentResponse) : null;
+    } catch {
+      return null;
+    }
+  }
+  if (typeof raw === 'object') return raw as StudentAssignmentResponse;
+  return null;
+}
+
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignmentRefreshTick, name, wordBank, dailyWordIds, onCompleteExercise }) => {
   const [viewMode, setViewMode] = useState<'hub' | 'wordList' | 'extraWords'>('hub');
   const [activeFlashcard, setActiveFlashcard] = useState<WordEntry | null>(null);
@@ -42,22 +84,48 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
   const [practiceHistory, setPracticeHistory] = useState<PracticeDay[]>([]);
   const [showPracticeHistory, setShowPracticeHistory] = useState(false);
   const [teacherAssignments, setTeacherAssignments] = useState<VocabStudentAssignment[]>([]);
-  const [activeAssignment, setActiveAssignment] = useState<VocabStudentAssignment | null>(null);
+  const [activeWritingPack, setActiveWritingPack] = useState<VocabStudentAssignment[] | null>(null);
+  const [writingPackInitialTotal, setWritingPackInitialTotal] = useState(0);
   const [markingAssignmentDone, setMarkingAssignmentDone] = useState(false);
+  const [assignmentAnswerText, setAssignmentAnswerText] = useState('');
+  const [assignmentSelectedOption, setAssignmentSelectedOption] = useState<number | null>(null);
+  const [assignmentSubmitError, setAssignmentSubmitError] = useState<string | null>(null);
+  const [draftSaveStatus, setDraftSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  /** Last saved draft for the open question (avoids autosave loops). */
+  const assignmentDraftBaselineRef = useRef<{ id: string; text: string; opt: number | null }>({
+    id: '',
+    text: '',
+    opt: null,
+  });
+  /** Only load server draft into the form when moving to a different question (not on every list refresh). */
+  const lastInitializedAssignmentIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!activeWritingPack) setWritingPackInitialTotal(0);
+  }, [activeWritingPack]);
   /** Filters on "Learn more words" page */
   const [extraYearFilter, setExtraYearFilter] = useState<string>('all');
   const [extraPatternFilter, setExtraPatternFilter] = useState<string>('all');
   const [extraSearch, setExtraSearch] = useState('');
   const [extraWordsPage, setExtraWordsPage] = useState(1);
 
-  const refreshAssignments = useCallback(() => {
+  const refreshAssignments = useCallback(async () => {
     if (!studentId) return;
-    getStudentAssignments(studentId)
-      .then(setTeacherAssignments)
-      .catch((e) => {
-        console.error('getStudentAssignments failed:', e);
-        setTeacherAssignments([]);
+    try {
+      const rows = await getStudentAssignments(studentId);
+      setTeacherAssignments(rows);
+      setActiveWritingPack(prev => {
+        if (!prev?.length) return prev;
+        const batchKey = prev[0].batch_id?.trim() || `solo:${prev[0].id}`;
+        const packs = groupIncompleteWritingPacks(rows);
+        const next = packs.find(p => (p[0].batch_id?.trim() || `solo:${p[0].id}`) === batchKey);
+        return next?.length ? next : null;
       });
+    } catch (e) {
+      console.error('getStudentAssignments failed:', e);
+      setTeacherAssignments([]);
+    }
   }, [studentId]);
 
   const assignmentTickRef = useRef(0);
@@ -221,6 +289,114 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
     [teacherAssignments]
   );
 
+  const writingPacks = useMemo(
+    () => groupIncompleteWritingPacks(teacherAssignments),
+    [teacherAssignments]
+  );
+
+  const activePackAssignment =
+    activeWritingPack && activeWritingPack.length > 0 ? activeWritingPack[0] : null;
+
+  const writingPackQuestionNumber =
+    activeWritingPack && activeWritingPack.length > 0 && writingPackInitialTotal > 0
+      ? writingPackInitialTotal - activeWritingPack.length + 1
+      : 0;
+
+  const writingPackProgressPercent =
+    writingPackInitialTotal > 0 && activeWritingPack
+      ? Math.round(
+          ((writingPackInitialTotal - activeWritingPack.length) / writingPackInitialTotal) * 100
+        )
+      : 0;
+
+  const activePackAssignmentId = activePackAssignment?.id;
+
+  useEffect(() => {
+    if (!activePackAssignmentId) {
+      lastInitializedAssignmentIdRef.current = null;
+      assignmentDraftBaselineRef.current = { id: '', text: '', opt: null };
+      setAssignmentAnswerText('');
+      setAssignmentSelectedOption(null);
+      setAssignmentSubmitError(null);
+      return;
+    }
+    if (lastInitializedAssignmentIdRef.current === activePackAssignmentId) return;
+    const current = activeWritingPack?.[0];
+    if (!current || current.id !== activePackAssignmentId) return;
+    lastInitializedAssignmentIdRef.current = activePackAssignmentId;
+    const dr = normalizeStudentDraftRaw(current.student_draft);
+    const text = dr?.text?.trim() ?? '';
+    const opt =
+      dr && typeof dr.selectedOptionIndex === 'number' && dr.selectedOptionIndex >= 0
+        ? dr.selectedOptionIndex
+        : null;
+    assignmentDraftBaselineRef.current = { id: activePackAssignmentId, text, opt };
+    setAssignmentAnswerText(text);
+    setAssignmentSelectedOption(opt);
+    setAssignmentSubmitError(null);
+    setDraftSaveStatus('idle');
+  }, [activePackAssignmentId, activeWritingPack]);
+
+  useEffect(() => {
+    if (!studentId || !activePackAssignmentId) return;
+    const baseline = assignmentDraftBaselineRef.current;
+    if (baseline.id !== activePackAssignmentId) return;
+
+    const tTrim = assignmentAnswerText.trim();
+    const opt = assignmentSelectedOption;
+    if (tTrim === baseline.text && opt === baseline.opt) return;
+
+    const timer = window.setTimeout(async () => {
+      setDraftSaveStatus('saving');
+      try {
+        const payload: StudentAssignmentResponse = {};
+        if (tTrim) payload.text = tTrim;
+        if (opt != null && opt >= 0) payload.selectedOptionIndex = opt;
+        await upsertStudentAssignmentDraft(activePackAssignmentId, Object.keys(payload).length ? payload : null);
+        await refreshAssignments();
+        assignmentDraftBaselineRef.current = {
+          id: activePackAssignmentId,
+          text: tTrim,
+          opt: opt ?? null,
+        };
+        setDraftSaveStatus('saved');
+        window.setTimeout(() => {
+          setDraftSaveStatus(s => (s === 'saved' ? 'idle' : s));
+        }, 2000);
+      } catch (e) {
+        console.error('Draft save failed:', e);
+        setDraftSaveStatus('error');
+      }
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [
+    studentId,
+    activePackAssignmentId,
+    assignmentAnswerText,
+    assignmentSelectedOption,
+    refreshAssignments,
+  ]);
+
+  const flushWritingDraft = useCallback(async () => {
+    if (!studentId || !activePackAssignmentId) return;
+    const tTrim = assignmentAnswerText.trim();
+    const opt = assignmentSelectedOption;
+    try {
+      const payload: StudentAssignmentResponse = {};
+      if (tTrim) payload.text = tTrim;
+      if (opt != null && opt >= 0) payload.selectedOptionIndex = opt;
+      await upsertStudentAssignmentDraft(activePackAssignmentId, Object.keys(payload).length ? payload : null);
+      await refreshAssignments();
+      assignmentDraftBaselineRef.current = {
+        id: activePackAssignmentId,
+        text: tTrim,
+        opt: opt ?? null,
+      };
+    } catch (e) {
+      console.error('Flush draft failed:', e);
+    }
+  }, [studentId, activePackAssignmentId, assignmentAnswerText, assignmentSelectedOption, refreshAssignments]);
+
   const handleMasterWord = (word: WordEntry) => {
     setActiveFlashcard(word);
   };
@@ -327,29 +503,50 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
                 <div className="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform"></div>
               </button>
 
-              {incompleteTeacherAssignments.length > 0 && (
+              {writingPacks.length > 0 && (
                 <div className="rounded-[2rem] border-4 border-sky-100 bg-sky-50/80 p-6 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-black text-sky-800 uppercase tracking-widest">From your teacher</span>
                     <span className="text-xs font-black bg-sky-200 text-sky-900 px-2 py-1 rounded-lg">
-                      {incompleteTeacherAssignments.length} to do
+                      {incompleteTeacherAssignments.length} question
+                      {incompleteTeacherAssignments.length !== 1 ? 's' : ''} · {writingPacks.length} pack
+                      {writingPacks.length !== 1 ? 's' : ''}
                     </span>
                   </div>
                   <p className="text-sm text-sky-900/80 font-medium">
-                    Your teacher picked these writing tasks for you. Open one, work on paper, then tap done.
+                    Open a pack and answer each question in order. Your work saves as you go — close anytime and open the
+                    same pack again to pick up where you left off.
                   </p>
                   <ul className="space-y-2">
-                    {incompleteTeacherAssignments.map(a => {
-                      const meta = a.exercise_type ? getWritingExerciseMeta(a.exercise_type) : undefined;
+                    {writingPacks.map(pack => {
+                      const first = pack[0];
+                      const packKey = (first.batch_id && String(first.batch_id).trim()) || first.id;
+                      const singleMeta = first.exercise_type
+                        ? getWritingExerciseMeta(first.exercise_type)
+                        : undefined;
+                      const title =
+                        pack.length > 1
+                          ? `Writing pack · ${pack.length} questions`
+                          : singleMeta?.label ?? first.title;
                       return (
-                        <li key={a.id}>
+                        <li key={packKey}>
                           <button
                             type="button"
-                            onClick={() => setActiveAssignment(a)}
+                            onClick={() => {
+                              setWritingPackInitialTotal(pack.length);
+                              setActiveWritingPack(pack);
+                            }}
                             className="w-full text-left bg-white hover:bg-sky-100 border-2 border-sky-200 rounded-2xl px-5 py-4 font-black text-sky-950 shadow-sm transition-colors flex items-center justify-between gap-2"
                           >
-                            <span>{meta?.label ?? a.title}</span>
-                            <span className="text-xl shrink-0">📋</span>
+                            <span className="flex flex-col gap-0.5">
+                              <span>{title}</span>
+                              {pack.length > 1 && (
+                                <span className="text-xs font-bold text-sky-700/90 normal-case">
+                                  Tap to work through all {pack.length} one by one
+                                </span>
+                              )}
+                            </span>
+                            <span className="text-xl shrink-0">{pack.length > 1 ? '📚' : '📋'}</span>
                           </button>
                         </li>
                       );
@@ -678,18 +875,36 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
         />
       )}
 
-      {activeAssignment && (
+      {activeWritingPack && activePackAssignment && (
         <div className="fixed inset-0 bg-sky-950/70 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-lg w-full max-h-[88vh] overflow-hidden flex flex-col border-4 border-sky-200 shadow-2xl">
             <div className="p-5 border-b border-sky-100 flex justify-between items-start gap-2 shrink-0">
-              <h2 className="text-xl font-black text-sky-950 leading-tight pr-2">
-                {activeAssignment.exercise_type
-                  ? getWritingExerciseMeta(activeAssignment.exercise_type)?.label ?? activeAssignment.title
-                  : activeAssignment.title}
-              </h2>
+              <div className="pr-2 min-w-0 flex-1">
+                {writingPackInitialTotal > 1 && (
+                  <p className="text-xs font-black text-sky-700 uppercase tracking-widest mb-1">
+                    Writing pack · Question {writingPackQuestionNumber} of {writingPackInitialTotal}
+                  </p>
+                )}
+                <h2 className="text-xl font-black text-sky-950 leading-tight">
+                  {activePackAssignment.exercise_type
+                    ? getWritingExerciseMeta(activePackAssignment.exercise_type)?.label ?? activePackAssignment.title
+                    : activePackAssignment.title}
+                </h2>
+                {writingPackInitialTotal > 1 && (
+                  <div className="mt-3 h-2 bg-sky-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-sky-500 rounded-full transition-all duration-300"
+                      style={{ width: `${writingPackProgressPercent}%` }}
+                    />
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
-                onClick={() => setActiveAssignment(null)}
+                onClick={async () => {
+                  await flushWritingDraft();
+                  setActiveWritingPack(null);
+                }}
                 className="p-2 hover:bg-sky-100 rounded-xl shrink-0"
                 aria-label="Close"
               >
@@ -699,38 +914,139 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
               </button>
             </div>
             <div className="p-5 overflow-y-auto flex-1 min-h-0 space-y-4">
-              <p className="text-sm font-bold text-gray-800 whitespace-pre-wrap">{activeAssignment.student_instructions}</p>
+              <p className="text-sm font-bold text-gray-800 whitespace-pre-wrap">
+                {activePackAssignment.student_instructions}
+              </p>
               <div className="bg-sky-50 rounded-2xl p-4 border border-sky-100">
-                <p className="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">{activeAssignment.main_content}</p>
+                <p className="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">
+                  {activePackAssignment.main_content}
+                </p>
               </div>
-              {activeAssignment.options && activeAssignment.options.length > 0 && (
-                <ol className="list-decimal list-inside space-y-1 text-sm font-bold text-gray-800">
-                  {activeAssignment.options.map((o, i) => (
-                    <li key={i}>{o}</li>
-                  ))}
-                </ol>
-              )}
+              <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/50 p-4 space-y-3">
+                <h3 className="text-xs font-black text-emerald-900 uppercase tracking-widest">Your answer online</h3>
+                <p className="text-xs font-bold text-emerald-800/90">
+                  Your typing and choices autosave. Close the pack and come back later — you&apos;ll continue on this
+                  same question with your draft restored.
+                </p>
+                {activePackAssignment.options && activePackAssignment.options.length > 0 ? (
+                  <fieldset className="space-y-2">
+                    <legend className="text-sm font-bold text-gray-800 mb-2">
+                      Tap the best answer (A, B, C…)
+                    </legend>
+                    {activePackAssignment.options.map((o, i) => (
+                      <label
+                        key={i}
+                        className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${
+                          assignmentSelectedOption === i
+                            ? 'border-emerald-600 bg-white shadow-sm'
+                            : 'border-gray-200 bg-white/80 hover:border-emerald-300'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name={`writing-mcq-${activePackAssignment.id}`}
+                          checked={assignmentSelectedOption === i}
+                          onChange={() => setAssignmentSelectedOption(i)}
+                          className="mt-1 w-4 h-4 text-emerald-600"
+                        />
+                        <span className="text-sm font-medium text-gray-900">
+                          <span className="font-black text-emerald-800 mr-1">{String.fromCharCode(65 + i)}.</span>
+                          {o}
+                        </span>
+                      </label>
+                    ))}
+                  </fieldset>
+                ) : null}
+                <div>
+                  <label
+                    htmlFor={`writing-free-${activePackAssignment.id}`}
+                    className="block text-sm font-bold text-gray-800 mb-1.5"
+                  >
+                    {activePackAssignment.options && activePackAssignment.options.length > 0
+                      ? 'Add more detail (optional)'
+                      : 'Type your answer'}
+                  </label>
+                  <textarea
+                    id={`writing-free-${activePackAssignment.id}`}
+                    value={assignmentAnswerText}
+                    onChange={e => setAssignmentAnswerText(e.target.value)}
+                    rows={activePackAssignment.options && activePackAssignment.options.length > 0 ? 3 : 6}
+                    placeholder={
+                      activePackAssignment.options && activePackAssignment.options.length > 0
+                        ? 'Explain your choice or add your sentence here…'
+                        : 'Write your sentence, rewrite, or answer here…'
+                    }
+                    className="w-full rounded-xl border-2 border-gray-200 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 outline-none resize-y min-h-[5rem]"
+                  />
+                </div>
+                {assignmentSubmitError && (
+                  <p className="text-sm font-bold text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                    {assignmentSubmitError}
+                  </p>
+                )}
+              </div>
             </div>
-            <div className="p-5 border-t border-sky-100 shrink-0">
+            <div className="p-5 border-t border-sky-100 shrink-0 space-y-2">
               <button
                 type="button"
                 disabled={markingAssignmentDone}
                 onClick={async () => {
+                  setAssignmentSubmitError(null);
+                  const hasMcq = !!(activePackAssignment.options && activePackAssignment.options.length > 0);
+                  const text = assignmentAnswerText.trim();
+                  if (hasMcq && assignmentSelectedOption == null) {
+                    setAssignmentSubmitError('Choose one of the answers above.');
+                    return;
+                  }
+                  if (!hasMcq && text.length < 2) {
+                    setAssignmentSubmitError('Please type your answer (at least a couple of words).');
+                    return;
+                  }
                   setMarkingAssignmentDone(true);
+                  const submittedId = activePackAssignment.id;
                   try {
-                    await markStudentAssignmentComplete(activeAssignment.id);
-                    refreshAssignments();
-                    setActiveAssignment(null);
+                    await submitStudentAssignmentAnswer(submittedId, {
+                      ...(hasMcq && assignmentSelectedOption != null
+                        ? { selectedOptionIndex: assignmentSelectedOption }
+                        : {}),
+                      ...(text.length > 0 ? { text } : {}),
+                    });
+                    lastInitializedAssignmentIdRef.current = null;
+                    await refreshAssignments();
+                    setActiveWritingPack(prev => {
+                      if (!prev) return null;
+                      const next = prev.filter(a => a.id !== submittedId);
+                      return next.length > 0 ? next : null;
+                    });
                   } catch (e) {
-                    console.error('Mark assignment complete failed:', e);
+                    const msg =
+                      e instanceof Error ? e.message : 'Could not save your answer. Ask your teacher to check the app is up to date.';
+                    setAssignmentSubmitError(msg);
+                    console.error('Submit assignment answer failed:', e);
                   } finally {
                     setMarkingAssignmentDone(false);
                   }
                 }}
                 className="w-full bg-emerald-600 text-white py-3.5 rounded-2xl font-black hover:bg-emerald-700 disabled:opacity-50 transition-colors"
               >
-                {markingAssignmentDone ? 'Saving…' : "I've finished this"}
+                {markingAssignmentDone
+                  ? 'Saving…'
+                  : writingPackInitialTotal > 1 && activeWritingPack.length > 1
+                    ? 'Submit & next question'
+                    : 'Submit & finish'}
               </button>
+              {draftSaveStatus === 'saving' && (
+                <p className="text-center text-xs font-bold text-sky-600">Saving your progress…</p>
+              )}
+              {draftSaveStatus === 'saved' && (
+                <p className="text-center text-xs font-bold text-emerald-600">Progress saved — safe to close if you need a break</p>
+              )}
+              {draftSaveStatus === 'error' && (
+                <p className="text-center text-xs font-bold text-red-600">Could not save draft. Check your connection.</p>
+              )}
+              <p className="text-center text-xs font-bold text-gray-500">
+                Your teacher can see what you submit here.
+              </p>
             </div>
           </div>
         </div>

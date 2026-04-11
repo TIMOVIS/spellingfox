@@ -1,4 +1,13 @@
-import { supabase, VocabWord, VocabStudent, VocabStudentProgress, VocabDailyQuest, VocabPracticeRecord, VocabStudentAssignment } from './supabase';
+import {
+  supabase,
+  VocabWord,
+  VocabStudent,
+  VocabStudentProgress,
+  VocabDailyQuest,
+  VocabPracticeRecord,
+  VocabStudentAssignment,
+  type StudentAssignmentResponse,
+} from './supabase';
 
 /** App timezone: London (Europe/London). */
 const LONDON_TIMEZONE = 'Europe/London';
@@ -470,11 +479,15 @@ export interface NewStudentAssignmentRow {
 
 export const insertStudentAssignments = async (
   studentId: string,
-  items: NewStudentAssignmentRow[]
+  items: NewStudentAssignmentRow[],
+  /** One shared id for the whole assign batch (student UI pack). */
+  batchId?: string | null
 ): Promise<void> => {
   if (items.length === 0) return;
+  const bid = batchId?.trim() || null;
   const rows = items.map((item, i) => ({
     student_id: studentId,
+    batch_id: bid,
     word_id: item.word_id ?? null,
     exercise_type: item.exercise_type ?? null,
     title: (item.title ?? 'Writing exercise').trim() || 'Writing exercise',
@@ -491,6 +504,75 @@ export const markStudentAssignmentComplete = async (assignmentId: string): Promi
   const { error } = await supabase
     .from('vocab_student_assignments')
     .update({ completed_at: new Date().toISOString() })
+    .eq('id', assignmentId);
+  if (error) throw error;
+};
+
+/** Save the student’s online answer and mark the assignment complete. */
+export const submitStudentAssignmentAnswer = async (
+  assignmentId: string,
+  response: StudentAssignmentResponse
+): Promise<void> => {
+  const payload: StudentAssignmentResponse = {};
+  if (response.text != null && String(response.text).trim()) {
+    payload.text = String(response.text).trim();
+  }
+  if (
+    response.selectedOptionIndex != null &&
+    typeof response.selectedOptionIndex === 'number' &&
+    response.selectedOptionIndex >= 0
+  ) {
+    payload.selectedOptionIndex = response.selectedOptionIndex;
+  }
+  if (Object.keys(payload).length === 0) {
+    throw new Error('Answer is empty.');
+  }
+  const { error } = await supabase
+    .from('vocab_student_assignments')
+    .update({
+      completed_at: new Date().toISOString(),
+      student_response: payload,
+      student_draft: null,
+    })
+    .eq('id', assignmentId);
+  if (error) throw error;
+};
+
+/** Autosave partial answer (does not mark complete). Pass null to clear draft. */
+export const upsertStudentAssignmentDraft = async (
+  assignmentId: string,
+  draft: StudentAssignmentResponse | null
+): Promise<void> => {
+  if (draft == null) {
+    const { error } = await supabase
+      .from('vocab_student_assignments')
+      .update({ student_draft: null })
+      .eq('id', assignmentId);
+    if (error) throw error;
+    return;
+  }
+  const payload: StudentAssignmentResponse = {};
+  if (draft.text != null && String(draft.text).trim()) {
+    payload.text = String(draft.text).trim();
+  }
+  if (
+    draft.selectedOptionIndex != null &&
+    typeof draft.selectedOptionIndex === 'number' &&
+    draft.selectedOptionIndex >= 0
+  ) {
+    payload.selectedOptionIndex = draft.selectedOptionIndex;
+  }
+  if (Object.keys(payload).length === 0) {
+    const { error } = await supabase
+      .from('vocab_student_assignments')
+      .update({ student_draft: null })
+      .eq('id', assignmentId);
+    if (error) throw error;
+    return;
+  }
+  const { error } = await supabase
+    .from('vocab_student_assignments')
+    .update({ student_draft: payload })
     .eq('id', assignmentId);
   if (error) throw error;
 };
