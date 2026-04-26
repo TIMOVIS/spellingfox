@@ -41,6 +41,11 @@ export interface StudentData {
   dailyWordIds: string[]; // IDs of words selected for today's list
   /** Word IDs ticked for "Writing exercises" (stored in Supabase). */
   writingWordIds: string[];
+  /** Teacher-set profile (stored on vocab_students). */
+  yearGroup?: YearGroup | null;
+  comprehensionLevel?: string | null;
+  writingLevel?: string | null;
+  interests?: string | null;
 }
 
 export interface AppState {

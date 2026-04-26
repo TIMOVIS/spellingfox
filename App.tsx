@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { UserRole, AppState, WordEntry, StudentData } from './types';
+import { UserRole, AppState, WordEntry, StudentData, YearGroup } from './types';
 import StudentDashboard from './components/StudentDashboard';
 import StudentNameEntry from './components/StudentNameEntry';
 import TutorDashboard from './components/TutorDashboard';
 import StudentSelector from './components/StudentSelector';
 import Navbar from './components/Navbar';
-import { toggleDailyQuestWord, assignWordsToDailyQuest, addStudent as addStudentToSupabase, deleteStudent as deleteStudentFromSupabase, getAllStudents, getStudentProgress, getDailyQuestWordIds, getStudentWritingWordIds, replaceStudentWritingWords, addPointsToStudent, savePracticeRecords } from './lib/supabaseQueries';
+import { toggleDailyQuestWord, assignWordsToDailyQuest, addStudent as addStudentToSupabase, deleteStudent as deleteStudentFromSupabase, getAllStudents, getStudentProgress, getDailyQuestWordIds, getStudentWritingWordIds, replaceStudentWritingWords, addPointsToStudent, savePracticeRecords, updateStudent as updateStudentInSupabase } from './lib/supabaseQueries';
 import type { WordPracticeResult, PracticeActivityType } from './lib/supabaseQueries';
 import { getAllWords } from './lib/supabaseQueries';
 import { supabase } from './lib/supabase';
@@ -95,7 +95,11 @@ const App: React.FC = () => {
               streak: progress?.streak || 0,
               wordBank: wordEntries,
               dailyWordIds,
-              writingWordIds
+              writingWordIds,
+              yearGroup: (student.year_group as YearGroup | null | undefined) ?? null,
+              comprehensionLevel: student.comprehension_level ?? null,
+              writingLevel: student.writing_level ?? null,
+              interests: student.interests ?? null,
             };
           })
         );
@@ -341,7 +345,11 @@ const App: React.FC = () => {
         streak: 0,
         wordBank: wordEntries,
         dailyWordIds: [],
-        writingWordIds: []
+        writingWordIds: [],
+        yearGroup: (vocabStudent.year_group as YearGroup | null | undefined) ?? null,
+        comprehensionLevel: vocabStudent.comprehension_level ?? null,
+        writingLevel: vocabStudent.writing_level ?? null,
+        interests: vocabStudent.interests ?? null,
       };
       
       // Update local state
@@ -359,7 +367,11 @@ const App: React.FC = () => {
         streak: 0,
         wordBank: [],
         dailyWordIds: [],
-        writingWordIds: []
+        writingWordIds: [],
+        yearGroup: null,
+        comprehensionLevel: null,
+        writingLevel: null,
+        interests: null,
       };
       setState(prev => ({
         ...prev,
@@ -398,6 +410,55 @@ const App: React.FC = () => {
   const getSelectedStudent = (): StudentData | null => {
     if (!state.selectedStudentId) return null;
     return state.students.find(s => s.id === state.selectedStudentId) || null;
+  };
+
+  const saveStudentProfile = async (
+    studentId: string,
+    profile: {
+      yearGroup: YearGroup | null;
+      comprehensionLevel: string | null;
+      writingLevel: string | null;
+      interests: string | null;
+    }
+  ) => {
+    if (studentId.startsWith('temp-')) {
+      setState(prev => ({
+        ...prev,
+        students: prev.students.map(s =>
+          s.id === studentId
+            ? {
+                ...s,
+                yearGroup: profile.yearGroup,
+                comprehensionLevel: profile.comprehensionLevel,
+                writingLevel: profile.writingLevel,
+                interests: profile.interests,
+              }
+            : s
+        ),
+      }));
+      return;
+    }
+    const row = {
+      year_group: profile.yearGroup,
+      comprehension_level: profile.comprehensionLevel?.trim() || null,
+      writing_level: profile.writingLevel?.trim() || null,
+      interests: profile.interests?.trim() || null,
+    };
+    await updateStudentInSupabase(studentId, row);
+    setState(prev => ({
+      ...prev,
+      students: prev.students.map(s =>
+        s.id === studentId
+          ? {
+              ...s,
+              yearGroup: profile.yearGroup,
+              comprehensionLevel: row.comprehension_level,
+              writingLevel: row.writing_level,
+              interests: row.interests,
+            }
+          : s
+      ),
+    }));
   };
 
   const updateWordBank = (newWords: WordEntry[]) => {
@@ -564,6 +625,13 @@ const App: React.FC = () => {
             wordBank={getSelectedStudent()?.wordBank || []} 
             dailyWordIds={getSelectedStudent()?.dailyWordIds || []}
             allStudents={state.students.map(s => ({ id: s.id, name: s.name }))}
+            studentProfile={{
+              yearGroup: getSelectedStudent()?.yearGroup ?? null,
+              comprehensionLevel: getSelectedStudent()?.comprehensionLevel ?? null,
+              writingLevel: getSelectedStudent()?.writingLevel ?? null,
+              interests: getSelectedStudent()?.interests ?? null,
+            }}
+            onSaveStudentProfile={saveStudentProfile}
             onBulkAssignDailyQuest={bulkAssignDailyQuest}
             onReplaceDailyQuest={replaceDailyQuestForStudent}
             onUpdateWords={updateWordBank}

@@ -1,6 +1,16 @@
 
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { WordEntry, YearGroup } from '../types';
+
+const STUDENT_YEAR_GROUPS: YearGroup[] = ['Year 3', 'Year 4', 'Year 5', 'Year 6'];
+const STUDENT_LEVEL_BANDS = ['Working towards', 'Expected', 'Greater depth'] as const;
+
+type TutorStudentProfile = {
+  yearGroup: YearGroup | null;
+  comprehensionLevel: string | null;
+  writingLevel: string | null;
+  interests: string | null;
+};
 import { generateWordExplanation, extractVocabularyFromFile, generateDailySpellingList } from '../geminiService';
 import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests, getStudentProgress, getStudentPracticeHistoryByDate, getStudentAssignments, assignWordsToDailyQuest, getTodayLondonDate } from '../lib/supabaseQueries';
 import { formatWordForDisplay } from '../lib/wordDisplay';
@@ -167,6 +177,8 @@ interface TutorDashboardProps {
   wordBank: WordEntry[];
   dailyWordIds: string[];
   allStudents: { id: string; name: string }[];
+  studentProfile: TutorStudentProfile;
+  onSaveStudentProfile: (studentId: string, profile: TutorStudentProfile) => Promise<void>;
   onBulkAssignDailyQuest: (studentIds: string[], wordIds: string[]) => Promise<void>;
   /** Replace the full daily quest word-id list (used for bulk select on page). */
   onReplaceDailyQuest: (wordIds: string[]) => Promise<void>;
@@ -179,7 +191,23 @@ interface TutorDashboardProps {
   onBack: () => void;
 }
 
-const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId, wordBank, dailyWordIds, allStudents, onBulkAssignDailyQuest, onReplaceDailyQuest, onUpdateWords, onToggleDaily, onRefetchDailyQuest, writingExerciseWordIds, onWritingExerciseWordIdsChange, onBack }) => {
+const TutorDashboard: React.FC<TutorDashboardProps> = ({
+  studentName,
+  studentId,
+  wordBank,
+  dailyWordIds,
+  allStudents,
+  studentProfile,
+  onSaveStudentProfile,
+  onBulkAssignDailyQuest,
+  onReplaceDailyQuest,
+  onUpdateWords,
+  onToggleDaily,
+  onRefetchDailyQuest,
+  writingExerciseWordIds,
+  onWritingExerciseWordIdsChange,
+  onBack,
+}) => {
   const [newWord, setNewWord] = useState('');
   const [loading, setLoading] = useState(false);
   const [showBulkAssignModal, setShowBulkAssignModal] = useState(false);
@@ -227,6 +255,14 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
   const [pastWritingLoading, setPastWritingLoading] = useState(false);
   const [pastWritingOpen, setPastWritingOpen] = useState(false);
   const [selectedPastWritingDate, setSelectedPastWritingDate] = useState<string | null>(null);
+
+  const [profileYear, setProfileYear] = useState<string>('');
+  const [profileComprehension, setProfileComprehension] = useState('');
+  const [profileWriting, setProfileWriting] = useState('');
+  const [profileInterests, setProfileInterests] = useState('');
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSavedAt, setProfileSavedAt] = useState<number | null>(null);
 
   const pastWritingDates = useMemo(() => {
     const keys = new Set<string>();
@@ -970,6 +1006,59 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
     setWordBankPage(1);
   }, [filterYearGroup, filterLearningPoint, filterWordFamily, filterGrammar, filterWriting, filterSemantic, filterPinnedOnly, filterSearch]);
 
+  useEffect(() => {
+    setProfileYear(studentProfile.yearGroup || '');
+    setProfileComprehension(studentProfile.comprehensionLevel || '');
+    setProfileWriting(studentProfile.writingLevel || '');
+    setProfileInterests(studentProfile.interests || '');
+    setProfileError(null);
+    setProfileSavedAt(null);
+  }, [
+    studentId,
+    studentProfile.yearGroup,
+    studentProfile.comprehensionLevel,
+    studentProfile.writingLevel,
+    studentProfile.interests,
+  ]);
+
+  const handleSaveStudentProfile = async () => {
+    setProfileSaving(true);
+    setProfileError(null);
+    setProfileSavedAt(null);
+    try {
+      const y = profileYear.trim();
+      const yearGroup: YearGroup | null =
+        y && STUDENT_YEAR_GROUPS.includes(y as YearGroup) ? (y as YearGroup) : null;
+      await onSaveStudentProfile(studentId, {
+        yearGroup,
+        comprehensionLevel: profileComprehension.trim() || null,
+        writingLevel: profileWriting.trim() || null,
+        interests: profileInterests.trim() || null,
+      });
+      setProfileSavedAt(Date.now());
+    } catch (e) {
+      setProfileError(e instanceof Error ? e.message : 'Could not save profile');
+    } finally {
+      setProfileSaving(false);
+    }
+  };
+
+  const levelSelectOptions = useMemo(() => {
+    const bands = [...STUDENT_LEVEL_BANDS] as string[];
+    const isBand = (x: string) => bands.includes(x);
+    const extras = new Set<string>();
+    for (const v of [
+      studentProfile.comprehensionLevel,
+      studentProfile.writingLevel,
+      profileComprehension,
+      profileWriting,
+    ]) {
+      const t = v?.trim();
+      if (t && !isBand(t)) extras.add(t);
+    }
+    return [...bands, ...[...extras].sort((a, b) => a.localeCompare(b))];
+  }, [studentProfile.comprehensionLevel, studentProfile.writingLevel, profileComprehension, profileWriting]);
+
   return (
     <div className="max-w-5xl mx-auto space-y-8 animate-in slide-in-from-bottom-4 duration-500 pb-20">
       <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -1011,6 +1100,89 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({ studentName, studentId,
           )}
         </button>
       </header>
+
+      <section className="bg-white rounded-3xl shadow-lg border border-indigo-100 p-6 md:p-8">
+        <h2 className="text-lg font-black text-gray-900 tracking-tight flex items-center gap-2 mb-1">
+          <span className="text-indigo-500">👤</span> Student profile
+        </h2>
+        <p className="text-sm text-gray-500 mb-6">
+          Year group and levels help you tune lists and tasks; interests can guide personalised examples later.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+          <div>
+            <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Year group</label>
+            <select
+              value={profileYear}
+              onChange={(e) => setProfileYear(e.target.value)}
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl px-4 py-3 font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+            >
+              <option value="">Not set</option>
+              {STUDENT_YEAR_GROUPS.map((yg) => (
+                <option key={yg} value={yg}>
+                  {yg}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Interests</label>
+            <input
+              type="text"
+              value={profileInterests}
+              onChange={(e) => setProfileInterests(e.target.value)}
+              placeholder="e.g. football, space, Minecraft"
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl px-4 py-3 font-bold text-gray-900 placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Comprehension level</label>
+            <select
+              value={profileComprehension}
+              onChange={(e) => setProfileComprehension(e.target.value)}
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl px-4 py-3 font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+            >
+              <option value="">Not set</option>
+              {levelSelectOptions.map((opt) => (
+                <option key={`c-${opt}`} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Writing level</label>
+            <select
+              value={profileWriting}
+              onChange={(e) => setProfileWriting(e.target.value)}
+              className="w-full bg-gray-50 border-2 border-gray-100 rounded-2xl px-4 py-3 font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+            >
+              <option value="">Not set</option>
+              {levelSelectOptions.map((opt) => (
+                <option key={`w-${opt}`} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSaveStudentProfile}
+            disabled={profileSaving || studentId.startsWith('temp-')}
+            className="bg-indigo-600 text-white px-6 py-3 rounded-2xl font-black shadow-md hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all active:scale-95"
+          >
+            {profileSaving ? 'Saving…' : 'Save profile'}
+          </button>
+          {profileSavedAt != null && (
+            <span className="text-sm font-bold text-emerald-600">Saved</span>
+          )}
+          {studentId.startsWith('temp-') && (
+            <span className="text-sm font-bold text-amber-700">Connect Supabase to persist this student.</span>
+          )}
+          {profileError && <span className="text-sm font-bold text-red-600">{profileError}</span>}
+        </div>
+      </section>
 
       {/* AI Recommendation Preview */}
       {recommendedDaily && (

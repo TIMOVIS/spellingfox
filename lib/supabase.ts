@@ -34,6 +34,11 @@ export interface VocabWord {
 export interface VocabStudent {
   id: string;
   name: string;
+  /** Student school year (UK-style), optional until teacher sets it */
+  year_group?: 'Year 3' | 'Year 4' | 'Year 5' | 'Year 6' | null;
+  comprehension_level?: string | null;
+  writing_level?: string | null;
+  interests?: string | null;
   created_at?: string;
   updated_at?: string;
 }
