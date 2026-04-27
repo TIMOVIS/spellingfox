@@ -23,6 +23,9 @@ DROP POLICY IF EXISTS "Daily quests can be updated by authenticated users" ON vo
 
 DROP POLICY IF EXISTS "Quest completions are viewable by authenticated users" ON vocab_quest_completions;
 DROP POLICY IF EXISTS "Quest completions can be inserted by authenticated users" ON vocab_quest_completions;
+DROP POLICY IF EXISTS "Generated exercises are viewable by authenticated users" ON vocab_generated_exercises;
+DROP POLICY IF EXISTS "Generated exercises can be inserted by authenticated users" ON vocab_generated_exercises;
+DROP POLICY IF EXISTS "Generated exercises can be updated by authenticated users" ON vocab_generated_exercises;
 
 -- Create new policies that allow anonymous access (for development)
 -- Words: Public read/write
@@ -108,5 +111,22 @@ CREATE POLICY "Quest completions can be updated by anyone"
 
 CREATE POLICY "Quest completions can be deleted by anyone"
     ON vocab_quest_completions FOR DELETE
+    USING (true);
+
+-- Generated exercises: Public read/write
+CREATE POLICY "Generated exercises are viewable by everyone"
+    ON vocab_generated_exercises FOR SELECT
+    USING (true);
+
+CREATE POLICY "Generated exercises can be inserted by anyone"
+    ON vocab_generated_exercises FOR INSERT
+    WITH CHECK (true);
+
+CREATE POLICY "Generated exercises can be updated by anyone"
+    ON vocab_generated_exercises FOR UPDATE
+    USING (true);
+
+CREATE POLICY "Generated exercises can be deleted by anyone"
+    ON vocab_generated_exercises FOR DELETE
     USING (true);
 

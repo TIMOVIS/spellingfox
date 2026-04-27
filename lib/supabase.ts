@@ -118,3 +118,22 @@ export interface VocabStudentAssignment {
   student_draft?: StudentAssignmentResponse | null;
   created_at?: string;
 }
+
+/** Saved AI-generated comprehension worksheet (passage + questions + generation config). */
+export interface VocabGeneratedExercise {
+  id: string;
+  student_id: string;
+  exercise_kind: 'comprehension';
+  title: string;
+  teacher_instructions: string;
+  passage: string;
+  questions: Record<string, unknown>[];
+  generator_config: Record<string, unknown>;
+  source_word_ids: string[];
+  assigned_at?: string | null;
+  completed_at?: string | null;
+  student_response?: Record<string, unknown> | null;
+  student_draft?: Record<string, unknown> | null;
+  created_at?: string;
+  updated_at?: string;
+}

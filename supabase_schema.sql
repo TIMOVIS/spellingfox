@@ -54,6 +54,13 @@ CREATE INDEX idx_vocab_words_letter_strings ON vocab_words USING GIN(letter_stri
 CREATE TABLE vocab_students (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     name TEXT NOT NULL,
+    -- Teacher-set profile (see supabase_student_profile_columns.sql for idempotent ALTER on existing DBs)
+    year_group TEXT CHECK (
+        year_group IS NULL OR year_group IN ('Year 3', 'Year 4', 'Year 5', 'Year 6')
+    ),
+    comprehension_level TEXT,
+    writing_level TEXT,
+    interests TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -134,6 +141,33 @@ CREATE INDEX idx_vocab_practice_records_practice_date ON vocab_practice_records(
 CREATE INDEX idx_vocab_practice_records_student_date ON vocab_practice_records(student_id, practice_date);
 
 -- ============================================
+-- GENERATED EXERCISES TABLE (AI outputs: text + questions)
+-- ============================================
+CREATE TABLE vocab_generated_exercises (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    student_id UUID NOT NULL REFERENCES vocab_students(id) ON DELETE CASCADE,
+    exercise_kind TEXT NOT NULL DEFAULT 'comprehension' CHECK (exercise_kind IN ('comprehension')),
+    title TEXT NOT NULL DEFAULT '',
+    teacher_instructions TEXT NOT NULL DEFAULT '',
+    passage TEXT NOT NULL DEFAULT '',
+    questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    generator_config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    source_word_ids UUID[] NOT NULL DEFAULT '{}',
+    assigned_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    student_response JSONB DEFAULT NULL,
+    student_draft JSONB DEFAULT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX idx_vocab_generated_exercises_student_id ON vocab_generated_exercises(student_id);
+CREATE INDEX idx_vocab_generated_exercises_student_created ON vocab_generated_exercises(student_id, created_at DESC);
+CREATE INDEX idx_vocab_generated_exercises_kind ON vocab_generated_exercises(exercise_kind);
+CREATE INDEX idx_vocab_generated_exercises_questions_gin ON vocab_generated_exercises USING GIN (questions jsonb_path_ops);
+CREATE INDEX idx_vocab_generated_exercises_config_gin ON vocab_generated_exercises USING GIN (generator_config jsonb_path_ops);
+
+-- ============================================
 -- TRIGGERS
 -- ============================================
 -- Auto-update updated_at timestamp
@@ -154,6 +188,9 @@ CREATE TRIGGER update_vocab_students_updated_at BEFORE UPDATE ON vocab_students
 CREATE TRIGGER update_vocab_student_progress_updated_at BEFORE UPDATE ON vocab_student_progress
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER update_vocab_generated_exercises_updated_at BEFORE UPDATE ON vocab_generated_exercises
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- ============================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ============================================
@@ -164,6 +201,7 @@ ALTER TABLE vocab_student_progress ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vocab_daily_quests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vocab_quest_completions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vocab_practice_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vocab_generated_exercises ENABLE ROW LEVEL SECURITY;
 
 -- Words: Public read, authenticated write
 CREATE POLICY "Words are viewable by everyone"
@@ -239,6 +277,18 @@ CREATE POLICY "Practice records can be updated by authenticated users"
     ON vocab_practice_records FOR UPDATE
     USING (auth.role() = 'authenticated');
 
+CREATE POLICY "Generated exercises are viewable by authenticated users"
+    ON vocab_generated_exercises FOR SELECT
+    USING (auth.role() = 'authenticated');
+
+CREATE POLICY "Generated exercises can be inserted by authenticated users"
+    ON vocab_generated_exercises FOR INSERT
+    WITH CHECK (auth.role() = 'authenticated');
+
+CREATE POLICY "Generated exercises can be updated by authenticated users"
+    ON vocab_generated_exercises FOR UPDATE
+    USING (auth.role() = 'authenticated');
+
 -- Allow anon (no Supabase Auth) so practice history works with the public anon key
 CREATE POLICY "Practice records anon select"
     ON vocab_practice_records FOR SELECT
@@ -246,6 +296,16 @@ CREATE POLICY "Practice records anon select"
 CREATE POLICY "Practice records anon insert"
     ON vocab_practice_records FOR INSERT
     WITH CHECK (true);
+
+CREATE POLICY "Generated exercises anon select"
+    ON vocab_generated_exercises FOR SELECT
+    USING (true);
+CREATE POLICY "Generated exercises anon insert"
+    ON vocab_generated_exercises FOR INSERT
+    WITH CHECK (true);
+CREATE POLICY "Generated exercises anon update"
+    ON vocab_generated_exercises FOR UPDATE
+    USING (true);
 
 -- ============================================
 -- HELPER FUNCTIONS

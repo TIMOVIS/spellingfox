@@ -306,6 +306,43 @@ export interface GeneratedWritingExerciseItem {
   teacherNotes: string;
 }
 
+export interface ComprehensionExerciseConfig {
+  yearGroup: string[];
+  wordDifficultyLevel: string[];
+  sentenceDifficultyLevel: string[];
+  genre: string[];
+  textStructure: string[];
+  topic: string[];
+  languageStyle: string[];
+  backgroundKnowledgeLevel: string[];
+  questionDifficultyLevel: string[];
+  questionType: string[];
+  supportScaffoldLevel: string[];
+  writingSkillFocus: string[];
+  writerCraftFeature: string[];
+  grammarQuestionType: string[];
+  sentenceQuestionType: string[];
+  punctuationFocus: string[];
+  vrQuestionType: string[];
+  wordCount: string[];
+}
+
+export interface GeneratedComprehensionQuestion {
+  questionType: string;
+  difficulty: string;
+  question: string;
+  options: string[];
+  answer: string;
+  explanation: string;
+}
+
+export interface GeneratedComprehensionExercise {
+  title: string;
+  teacherInstructions: string;
+  passage: string;
+  questions: GeneratedComprehensionQuestion[];
+}
+
 const MAX_WORDS_FOR_WRITING_EXERCISES = 12;
 
 /**
@@ -535,6 +572,112 @@ export const generateWritingExercises = async (
     merged.push(...(await runSingleWritingExercisePlan(plan, ids, priorByWordAndType, offset)));
   }
   return merged;
+};
+
+export const generateComprehensionExercises = async (
+  words: Pick<WordEntry, "id" | "word" | "definition" | "example" | "yearGroup">[],
+  config: ComprehensionExerciseConfig
+): Promise<GeneratedComprehensionExercise> => {
+  if (!words.length) {
+    throw new Error("Select at least one word from the word bank.");
+  }
+  const hasAll = Object.values(config).every((v) => Array.isArray(v) && v.length > 0);
+  if (!hasAll) {
+    throw new Error("Please choose at least one item for each comprehension option.");
+  }
+
+  const selectedWords = words.slice(0, 10);
+
+  if (!apiKey || !ai) {
+    return callGeminiServer<GeneratedComprehensionExercise>("comprehensionExercises", {
+      words: selectedWords,
+      config,
+    });
+  }
+
+  const wordsBlock = selectedWords
+    .map((w, i) => `${i + 1}. ${w.word} (${w.yearGroup}) — ${w.definition || "No definition available"}`)
+    .join("\n");
+
+  const list = (x: string[]) => x.join(", ");
+
+  const prompt = `Create one UK-primary comprehension worksheet and answer key.
+
+Target vocabulary from our word bank:
+${wordsBlock}
+
+Teacher choices:
+- year group: ${list(config.yearGroup)}
+- word difficulty level: ${list(config.wordDifficultyLevel)}
+- sentence difficulty level: ${list(config.sentenceDifficultyLevel)}
+- genre: ${list(config.genre)}
+- text structure: ${list(config.textStructure)}
+- topic: ${list(config.topic)}
+- language style: ${list(config.languageStyle)}
+- background knowledge level: ${list(config.backgroundKnowledgeLevel)}
+- question difficulty level: ${list(config.questionDifficultyLevel)}
+- question type: ${list(config.questionType)}
+- support / scaffold level: ${list(config.supportScaffoldLevel)}
+- writing skill focus: ${list(config.writingSkillFocus)}
+- writer’s craft feature: ${list(config.writerCraftFeature)}
+- VR question type: ${list(config.vrQuestionType)}
+- Grammar question type: ${list(config.grammarQuestionType)}
+- sentence question type: ${list(config.sentenceQuestionType)}
+- punctuation focus: ${list(config.punctuationFocus)}
+- word count: ${list(config.wordCount)}
+
+Requirements:
+1) Write a single comprehension passage in the selected word-count range.
+2) Keep language in British English and suitable for the selected year groups.
+3) Include exactly 10 questions in total, mixing the chosen question types.
+4) Every question must include: questionType, difficulty, question, options (empty array if not MCQ), answer, explanation.
+5) The selected vocabulary words may appear in the passage OR in the questions (or both). Do not force every selected word into the passage.
+6) Apply support/scaffold level in question wording and hints.
+7) Include follow-up style in question design using writing skill focus, writer’s craft feature, and punctuation focus.
+8) Ensure at least:
+   - 2 VR questions aligned to selected VR question types
+   - 2 Grammar questions aligned to selected Grammar question types
+   - 2 Sentence questions aligned to selected sentence question types
+9) If MCQ, include 4 options.
+10) Return JSON only.`;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+    config: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          teacherInstructions: { type: Type.STRING },
+          passage: { type: Type.STRING },
+          questions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                questionType: { type: Type.STRING },
+                difficulty: { type: Type.STRING },
+                question: { type: Type.STRING },
+                options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                answer: { type: Type.STRING },
+                explanation: { type: Type.STRING },
+              },
+              required: ["questionType", "difficulty", "question", "options", "answer", "explanation"],
+            },
+          },
+        },
+        required: ["title", "teacherInstructions", "passage", "questions"],
+      },
+    },
+  });
+
+  const parsed = JSON.parse(response.text || "{}") as GeneratedComprehensionExercise;
+  if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+    throw new Error("Invalid response from comprehension exercise generator.");
+  }
+  return parsed;
 };
 
 export const generateQuizQuestions = async (words: string[]) => {

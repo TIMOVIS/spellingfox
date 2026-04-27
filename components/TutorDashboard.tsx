@@ -28,6 +28,7 @@ import {
   tagsPresentInWordBank,
 } from '../lib/vocabTaxonomy';
 import WritingExercisesModal from './WritingExercisesModal';
+import ComprehensionExercisesModal from './ComprehensionExercisesModal';
 
 function firstNonEmptyString(...vals: unknown[]): string | undefined {
   for (const v of vals) {
@@ -232,6 +233,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
   const [filterSearch, setFilterSearch] = useState<string>('');
   const [wordBankPage, setWordBankPage] = useState(1);
   const [writingExercisesOpen, setWritingExercisesOpen] = useState(false);
+  const [comprehensionExercisesOpen, setComprehensionExercisesOpen] = useState(false);
   const [dailyBulkReplacing, setDailyBulkReplacing] = useState(false);
   const [editingWord, setEditingWord] = useState<WordEntry | null>(null);
   const [editFormData, setEditFormData] = useState<Partial<WordEntry>>({});
@@ -1973,6 +1975,18 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
                    <span className="bg-white/20 px-2 py-0.5 rounded-lg">{writingExerciseWordIds.length}</span>
                  )}
                </button>
+               <button
+                 type="button"
+                 onClick={() => setComprehensionExercisesOpen(true)}
+                 disabled={writingExerciseWordIds.length === 0}
+                 className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-sm hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                 title="Generate AI comprehension text and questions using selected options"
+               >
+                 📘 Comprehension exercises
+                 {writingExerciseWordIds.length > 0 && (
+                   <span className="bg-white/20 px-2 py-0.5 rounded-lg">{writingExerciseWordIds.length}</span>
+                 )}
+               </button>
             </div>
           </div>
           <p className="text-xs text-gray-600 font-medium mb-3 leading-relaxed">
@@ -2582,6 +2596,13 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
         assignStudentId={studentId}
         assignStudentName={studentName}
         onAssigned={refreshPastWritingAssignments}
+      />
+      <ComprehensionExercisesModal
+        open={comprehensionExercisesOpen}
+        onClose={() => setComprehensionExercisesOpen(false)}
+        selectedWords={selectedWordsForExercises}
+        studentId={studentId}
+        studentName={studentName}
       />
     </div>
   );

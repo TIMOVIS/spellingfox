@@ -11,9 +11,12 @@ import {
   getStudentAssignments,
   submitStudentAssignmentAnswer,
   upsertStudentAssignmentDraft,
+  getStudentComprehensionExercises,
+  submitStudentComprehensionResponse,
+  upsertStudentComprehensionDraft,
 } from '../lib/supabaseQueries';
 import type { PracticeActivityType } from '../lib/supabaseQueries';
-import type { VocabStudentAssignment, StudentAssignmentResponse } from '../lib/supabase';
+import type { VocabStudentAssignment, StudentAssignmentResponse, VocabGeneratedExercise } from '../lib/supabase';
 import { formatWordForDisplay } from '../lib/wordDisplay';
 import { getWritingExerciseMeta } from '../lib/writingExerciseTypes';
 import { supabase } from '../lib/supabase';
@@ -71,6 +74,31 @@ function normalizeStudentDraftRaw(raw: unknown): StudentAssignmentResponse | nul
   return null;
 }
 
+type ComprehensionQuestion = {
+  questionType: string;
+  difficulty: string;
+  question: string;
+  options: string[];
+};
+
+function normalizeComprehensionQuestions(raw: unknown): ComprehensionQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((q) => {
+      if (!q || typeof q !== 'object') return null;
+      const obj = q as Record<string, unknown>;
+      const question = typeof obj.question === 'string' ? obj.question.trim() : '';
+      if (!question) return null;
+      return {
+        questionType: typeof obj.questionType === 'string' ? obj.questionType : 'question',
+        difficulty: typeof obj.difficulty === 'string' ? obj.difficulty : 'core',
+        question,
+        options: Array.isArray(obj.options) ? obj.options.filter((x): x is string => typeof x === 'string') : [],
+      };
+    })
+    .filter((x): x is ComprehensionQuestion => !!x);
+}
+
 const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignmentRefreshTick, name, wordBank, dailyWordIds, onCompleteExercise }) => {
   const [viewMode, setViewMode] = useState<'hub' | 'wordList' | 'extraWords'>('hub');
   const [activeFlashcard, setActiveFlashcard] = useState<WordEntry | null>(null);
@@ -84,13 +112,19 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
   const [practiceHistory, setPracticeHistory] = useState<PracticeDay[]>([]);
   const [showPracticeHistory, setShowPracticeHistory] = useState(false);
   const [teacherAssignments, setTeacherAssignments] = useState<VocabStudentAssignment[]>([]);
+  const [comprehensionAssignments, setComprehensionAssignments] = useState<VocabGeneratedExercise[]>([]);
   const [activeWritingPack, setActiveWritingPack] = useState<VocabStudentAssignment[] | null>(null);
+  const [activeComprehension, setActiveComprehension] = useState<VocabGeneratedExercise | null>(null);
   const [writingPackInitialTotal, setWritingPackInitialTotal] = useState(0);
   const [markingAssignmentDone, setMarkingAssignmentDone] = useState(false);
   const [assignmentAnswerText, setAssignmentAnswerText] = useState('');
   const [assignmentSelectedOption, setAssignmentSelectedOption] = useState<number | null>(null);
   const [assignmentSubmitError, setAssignmentSubmitError] = useState<string | null>(null);
   const [draftSaveStatus, setDraftSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [comprehensionAnswers, setComprehensionAnswers] = useState<Record<string, string>>({});
+  const [comprehensionSubmitError, setComprehensionSubmitError] = useState<string | null>(null);
+  const [comprehensionSaving, setComprehensionSaving] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [submittingComprehension, setSubmittingComprehension] = useState(false);
 
   /** Last saved draft for the open question (avoids autosave loops). */
   const assignmentDraftBaselineRef = useRef<{ id: string; text: string; opt: number | null }>({
@@ -128,6 +162,21 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
     }
   }, [studentId]);
 
+  const refreshComprehension = useCallback(async () => {
+    if (!studentId) return;
+    try {
+      const rows = await getStudentComprehensionExercises(studentId);
+      setComprehensionAssignments(rows);
+      setActiveComprehension((prev) => {
+        if (!prev) return prev;
+        return rows.find((r) => r.id === prev.id) || null;
+      });
+    } catch (e) {
+      console.error('getStudentComprehensionExercises failed:', e);
+      setComprehensionAssignments([]);
+    }
+  }, [studentId]);
+
   const assignmentTickRef = useRef(0);
   useEffect(() => {
     if (!studentId) return;
@@ -135,7 +184,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
     if (t === assignmentTickRef.current) return;
     assignmentTickRef.current = t;
     refreshAssignments();
-  }, [assignmentRefreshTick, studentId, refreshAssignments]);
+    refreshComprehension();
+  }, [assignmentRefreshTick, studentId, refreshAssignments, refreshComprehension]);
 
   useEffect(() => {
     if (!studentId) return;
@@ -143,7 +193,8 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
       .then(setPracticeHistory)
       .catch(() => setPracticeHistory([]));
     refreshAssignments();
-  }, [studentId, refreshAssignments]);
+    refreshComprehension();
+  }, [studentId, refreshAssignments, refreshComprehension]);
 
   // Refetch when opening the panel so latest practice is shown
   useEffect(() => {
@@ -156,23 +207,32 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
 
   useEffect(() => {
     if (!studentId) return;
-    const t = setInterval(() => refreshAssignments(), 20_000);
+    const t = setInterval(() => {
+      refreshAssignments();
+      refreshComprehension();
+    }, 20_000);
     return () => clearInterval(t);
-  }, [studentId, refreshAssignments]);
+  }, [studentId, refreshAssignments, refreshComprehension]);
 
   useEffect(() => {
     if (!studentId) return;
     const onVisible = () => {
-      if (document.visibilityState === 'visible') refreshAssignments();
+      if (document.visibilityState === 'visible') {
+        refreshAssignments();
+        refreshComprehension();
+      }
     };
-    const onFocus = () => refreshAssignments();
+    const onFocus = () => {
+      refreshAssignments();
+      refreshComprehension();
+    };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onFocus);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onFocus);
     };
-  }, [studentId, refreshAssignments]);
+  }, [studentId, refreshAssignments, refreshComprehension]);
 
   useEffect(() => {
     if (!studentId) return;
@@ -193,6 +253,26 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
       supabase.removeChannel(channel);
     };
   }, [studentId, refreshAssignments]);
+
+  useEffect(() => {
+    if (!studentId) return;
+    const channel = supabase
+      .channel(`student-comprehension-${studentId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'vocab_generated_exercises',
+          filter: `student_id=eq.${studentId}`,
+        },
+        () => refreshComprehension()
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [studentId, refreshComprehension]);
 
   const LONDON = 'Europe/London';
 
@@ -288,6 +368,10 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
     () => teacherAssignments.filter(a => !a.completed_at),
     [teacherAssignments]
   );
+  const incompleteComprehension = useMemo(
+    () => comprehensionAssignments.filter((a) => !a.completed_at),
+    [comprehensionAssignments]
+  );
 
   const writingPacks = useMemo(
     () => groupIncompleteWritingPacks(teacherAssignments),
@@ -310,6 +394,10 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
       : 0;
 
   const activePackAssignmentId = activePackAssignment?.id;
+  const activeComprehensionQuestions = useMemo(
+    () => normalizeComprehensionQuestions(activeComprehension?.questions),
+    [activeComprehension]
+  );
 
   useEffect(() => {
     if (!activePackAssignmentId) {
@@ -336,6 +424,28 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
     setAssignmentSubmitError(null);
     setDraftSaveStatus('idle');
   }, [activePackAssignmentId, activeWritingPack]);
+
+  useEffect(() => {
+    if (!activeComprehension) {
+      setComprehensionAnswers({});
+      setComprehensionSubmitError(null);
+      setComprehensionSaving('idle');
+      return;
+    }
+    const draft = activeComprehension.student_draft;
+    if (draft && typeof draft === 'object') {
+      const obj = draft as Record<string, unknown>;
+      const next: Record<string, string> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === 'string') next[k] = v;
+      }
+      setComprehensionAnswers(next);
+    } else {
+      setComprehensionAnswers({});
+    }
+    setComprehensionSubmitError(null);
+    setComprehensionSaving('idle');
+  }, [activeComprehension]);
 
   useEffect(() => {
     if (!studentId || !activePackAssignmentId) return;
@@ -376,6 +486,32 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
     assignmentSelectedOption,
     refreshAssignments,
   ]);
+
+  useEffect(() => {
+    if (!studentId || !activeComprehension) return;
+    const timer = window.setTimeout(async () => {
+      setComprehensionSaving('saving');
+      try {
+        const cleaned: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(comprehensionAnswers)) {
+          const t = String(v ?? '').trim();
+          if (t) cleaned[k] = t;
+        }
+        await upsertStudentComprehensionDraft(
+          activeComprehension.id,
+          Object.keys(cleaned).length ? cleaned : null
+        );
+        setComprehensionSaving('saved');
+        window.setTimeout(() => {
+          setComprehensionSaving((s) => (s === 'saved' ? 'idle' : s));
+        }, 1800);
+      } catch (e) {
+        console.error('Comprehension draft save failed:', e);
+        setComprehensionSaving('error');
+      }
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [studentId, activeComprehension, comprehensionAnswers]);
 
   const flushWritingDraft = useCallback(async () => {
     if (!studentId || !activePackAssignmentId) return;
@@ -551,6 +687,34 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
                         </li>
                       );
                     })}
+                  </ul>
+                </div>
+              )}
+
+              {incompleteComprehension.length > 0 && (
+                <div className="rounded-[2rem] border-4 border-indigo-100 bg-indigo-50/80 p-6 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-black text-indigo-800 uppercase tracking-widest">Comprehension exercise</span>
+                    <span className="text-xs font-black bg-indigo-200 text-indigo-900 px-2 py-1 rounded-lg">
+                      {incompleteComprehension.length} pending
+                    </span>
+                  </div>
+                  <p className="text-sm text-indigo-900/80 font-medium">
+                    Read the text and answer with clickable options or typed responses.
+                  </p>
+                  <ul className="space-y-2">
+                    {incompleteComprehension.map((ex) => (
+                      <li key={ex.id}>
+                        <button
+                          type="button"
+                          onClick={() => setActiveComprehension(ex)}
+                          className="w-full text-left bg-white hover:bg-indigo-100 border-2 border-indigo-200 rounded-2xl px-5 py-4 font-black text-indigo-950 shadow-sm transition-colors flex items-center justify-between gap-2"
+                        >
+                          <span>{ex.title || 'Comprehension exercise'}</span>
+                          <span className="text-xl shrink-0">📘</span>
+                        </button>
+                      </li>
+                    ))}
                   </ul>
                 </div>
               )}
@@ -1047,6 +1211,136 @@ const StudentDashboard: React.FC<StudentDashboardProps> = ({ studentId, assignme
               <p className="text-center text-xs font-bold text-gray-500">
                 Your teacher can see what you submit here.
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeComprehension && (
+        <div className="fixed inset-0 bg-indigo-950/70 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col border-4 border-indigo-200 shadow-2xl">
+            <div className="p-5 border-b border-indigo-100 flex justify-between items-start gap-2 shrink-0">
+              <div className="pr-2 min-w-0 flex-1">
+                <p className="text-xs font-black text-indigo-700 uppercase tracking-widest mb-1">Comprehension exercise</p>
+                <h2 className="text-xl font-black text-indigo-950 leading-tight">
+                  {activeComprehension.title || 'Comprehension exercise'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveComprehension(null)}
+                className="p-2 hover:bg-indigo-100 rounded-xl shrink-0"
+                aria-label="Close"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto flex-1 min-h-0 space-y-4">
+              <p className="text-sm font-bold text-gray-800 whitespace-pre-wrap">
+                {activeComprehension.teacher_instructions}
+              </p>
+              <div className="bg-indigo-50 rounded-2xl p-4 border border-indigo-100">
+                <p className="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">{activeComprehension.passage}</p>
+              </div>
+              <div className="space-y-4">
+                {activeComprehensionQuestions.map((q, idx) => {
+                  const key = `q_${idx}`;
+                  const value = comprehensionAnswers[key] ?? '';
+                  return (
+                    <div key={key} className="rounded-2xl border-2 border-indigo-100 p-4">
+                      <p className="text-[11px] font-black text-indigo-600 uppercase tracking-widest mb-1">
+                        {q.questionType} · {q.difficulty}
+                      </p>
+                      <p className="text-sm font-bold text-gray-900 mb-3">
+                        {idx + 1}. {q.question}
+                      </p>
+                      {q.options.length > 0 ? (
+                        <fieldset className="space-y-2">
+                          {q.options.map((opt, i) => (
+                            <label
+                              key={i}
+                              className={`flex items-start gap-3 p-3 rounded-xl border-2 cursor-pointer transition-colors ${
+                                value === opt
+                                  ? 'border-indigo-600 bg-white shadow-sm'
+                                  : 'border-gray-200 bg-white/80 hover:border-indigo-300'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`comprehension-${activeComprehension.id}-${key}`}
+                                checked={value === opt}
+                                onChange={() =>
+                                  setComprehensionAnswers((prev) => ({
+                                    ...prev,
+                                    [key]: opt,
+                                  }))
+                                }
+                                className="mt-1 w-4 h-4 text-indigo-600"
+                              />
+                              <span className="text-sm font-medium text-gray-900">
+                                <span className="font-black text-indigo-800 mr-1">{String.fromCharCode(65 + i)}.</span>
+                                {opt}
+                              </span>
+                            </label>
+                          ))}
+                        </fieldset>
+                      ) : (
+                        <textarea
+                          value={value}
+                          onChange={(e) =>
+                            setComprehensionAnswers((prev) => ({
+                              ...prev,
+                              [key]: e.target.value,
+                            }))
+                          }
+                          rows={4}
+                          placeholder="Type your answer…"
+                          className="w-full rounded-xl border-2 border-gray-200 px-3 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none resize-y"
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {comprehensionSubmitError && (
+                <p className="text-sm font-bold text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">
+                  {comprehensionSubmitError}
+                </p>
+              )}
+            </div>
+            <div className="p-5 border-t border-indigo-100 shrink-0 space-y-2">
+              <button
+                type="button"
+                disabled={submittingComprehension}
+                onClick={async () => {
+                  setComprehensionSubmitError(null);
+                  setSubmittingComprehension(true);
+                  try {
+                    await submitStudentComprehensionResponse(activeComprehension.id, comprehensionAnswers);
+                    await refreshComprehension();
+                    setActiveComprehension(null);
+                  } catch (e) {
+                    const msg = e instanceof Error ? e.message : 'Could not submit your comprehension answers.';
+                    setComprehensionSubmitError(msg);
+                  } finally {
+                    setSubmittingComprehension(false);
+                  }
+                }}
+                className="w-full bg-indigo-600 text-white py-3.5 rounded-2xl font-black hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              >
+                {submittingComprehension ? 'Submitting…' : 'Submit comprehension'}
+              </button>
+              {comprehensionSaving === 'saving' && (
+                <p className="text-center text-xs font-bold text-indigo-600">Saving your progress…</p>
+              )}
+              {comprehensionSaving === 'saved' && (
+                <p className="text-center text-xs font-bold text-emerald-600">Progress saved</p>
+              )}
+              {comprehensionSaving === 'error' && (
+                <p className="text-center text-xs font-bold text-red-600">Could not save draft. Check your connection.</p>
+              )}
             </div>
           </div>
         </div>

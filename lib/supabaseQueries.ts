@@ -6,6 +6,7 @@ import {
   VocabDailyQuest,
   VocabPracticeRecord,
   VocabStudentAssignment,
+  VocabGeneratedExercise,
   type StudentAssignmentResponse,
 } from './supabase';
 
@@ -143,8 +144,13 @@ export const updateStudent = async (id: string, updates: Partial<VocabStudent>):
     .eq('id', id)
     .select()
     .single();
-  
-  if (error) throw error;
+
+  if (error) {
+    const parts = [error.message, error.details, error.hint].filter(
+      (x): x is string => typeof x === 'string' && x.trim().length > 0
+    );
+    throw new Error(parts.join(' — '));
+  }
   return data;
 };
 
@@ -574,5 +580,91 @@ export const upsertStudentAssignmentDraft = async (
     .from('vocab_student_assignments')
     .update({ student_draft: payload })
     .eq('id', assignmentId);
+  if (error) throw error;
+};
+
+export const insertGeneratedComprehensionExercise = async (
+  studentId: string,
+  payload: {
+    title: string;
+    teacherInstructions: string;
+    passage: string;
+    questions: Array<Record<string, unknown>>;
+    generatorConfig: Record<string, unknown>;
+    sourceWordIds: string[];
+  }
+): Promise<VocabGeneratedExercise> => {
+  const { data, error } = await supabase
+    .from('vocab_generated_exercises')
+    .insert([
+      {
+        student_id: studentId,
+        exercise_kind: 'comprehension',
+        title: payload.title || '',
+        teacher_instructions: payload.teacherInstructions || '',
+        passage: payload.passage || '',
+        questions: payload.questions || [],
+        generator_config: payload.generatorConfig || {},
+        source_word_ids: payload.sourceWordIds || [],
+      },
+    ])
+    .select()
+    .single();
+  if (error) throw error;
+  return data as VocabGeneratedExercise;
+};
+
+export const getStudentComprehensionExercises = async (
+  studentId: string
+): Promise<VocabGeneratedExercise[]> => {
+  const { data, error } = await supabase
+    .from('vocab_generated_exercises')
+    .select('*')
+    .eq('student_id', studentId)
+    .eq('exercise_kind', 'comprehension')
+    .not('assigned_at', 'is', null)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []) as VocabGeneratedExercise[];
+};
+
+export const assignGeneratedComprehensionExercise = async (
+  exerciseId: string
+): Promise<void> => {
+  const { error } = await supabase
+    .from('vocab_generated_exercises')
+    .update({ assigned_at: new Date().toISOString() })
+    .eq('id', exerciseId);
+  if (error) throw error;
+};
+
+export const upsertStudentComprehensionDraft = async (
+  exerciseId: string,
+  draft: Record<string, unknown> | null
+): Promise<void> => {
+  const { error } = await supabase
+    .from('vocab_generated_exercises')
+    .update({ student_draft: draft })
+    .eq('id', exerciseId);
+  if (error) throw error;
+};
+
+export const submitStudentComprehensionResponse = async (
+  exerciseId: string,
+  response: Record<string, unknown>
+): Promise<void> => {
+  const hasAny = Object.values(response).some((v) => {
+    if (typeof v === 'string') return v.trim().length > 0;
+    return v != null;
+  });
+  if (!hasAny) throw new Error('Please answer at least one question.');
+  const { error } = await supabase
+    .from('vocab_generated_exercises')
+    .update({
+      completed_at: new Date().toISOString(),
+      student_response: response,
+      student_draft: null,
+    })
+    .eq('id', exerciseId);
   if (error) throw error;
 };

@@ -75,6 +75,15 @@ export const handler = async (event: { httpMethod: string; body: string | null }
         );
         return { statusCode: 200, headers, body: JSON.stringify(result) };
       }
+      case 'comprehensionExercises': {
+        const words = body.words;
+        const config = body.config;
+        if (!Array.isArray(words) || !config || typeof config !== 'object') {
+          return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing words or config' }) };
+        }
+        const result = await gemini.generateComprehensionExercises(words, config);
+        return { statusCode: 200, headers, body: JSON.stringify(result) };
+      }
       default:
         return { statusCode: 400, headers, body: JSON.stringify({ error: 'Unknown action' }) };
     }
