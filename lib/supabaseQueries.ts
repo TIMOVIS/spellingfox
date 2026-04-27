@@ -635,7 +635,15 @@ export const assignGeneratedComprehensionExercise = async (
     .from('vocab_generated_exercises')
     .update({ assigned_at: new Date().toISOString() })
     .eq('id', exerciseId);
-  if (error) throw error;
+  if (error) {
+    const msg = `${error.message || ''} ${error.details || ''} ${error.hint || ''}`.toLowerCase();
+    if (msg.includes('assigned_at') || msg.includes('student_response') || msg.includes('student_draft')) {
+      throw new Error(
+        'Comprehension table is missing new columns. Run supabase_generated_exercises.sql in Supabase SQL Editor, then try assign again.'
+      );
+    }
+    throw error;
+  }
 };
 
 export const upsertStudentComprehensionDraft = async (

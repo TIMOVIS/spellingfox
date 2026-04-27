@@ -12,9 +12,9 @@ type TutorStudentProfile = {
   interests: string | null;
 };
 import { generateWordExplanation, extractVocabularyFromFile, generateDailySpellingList } from '../geminiService';
-import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests, getStudentProgress, getStudentPracticeHistoryByDate, getStudentAssignments, assignWordsToDailyQuest, getTodayLondonDate } from '../lib/supabaseQueries';
+import { getAllWords, addWord as addWordToSupabase, toggleDailyQuestWord, updateWord as updateWordInSupabase, deleteWord as deleteWordFromSupabase, getStudentDailyQuestDates, getStudentDailyQuests, getStudentProgress, getStudentPracticeHistoryByDate, getStudentAssignments, assignWordsToDailyQuest, getTodayLondonDate, getStudentComprehensionExercises } from '../lib/supabaseQueries';
 import { formatWordForDisplay } from '../lib/wordDisplay';
-import { VocabWord, VocabStudentAssignment } from '../lib/supabase';
+import { VocabWord, VocabStudentAssignment, VocabGeneratedExercise } from '../lib/supabase';
 import { getWritingExerciseMeta } from '../lib/writingExerciseTypes';
 import { vocabWordToWordEntry } from '../lib/vocabWordEntry';
 import {
@@ -172,6 +172,15 @@ function onlineAnswerPresent(p: { choiceText?: string; freeText?: string }): boo
   return !!(p.choiceText || p.freeText);
 }
 
+function normalizeComprehensionAnswerMap(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'string' && v.trim()) out[k] = v.trim();
+  }
+  return out;
+}
+
 interface TutorDashboardProps {
   studentName: string;
   studentId: string;
@@ -257,6 +266,10 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
   const [pastWritingLoading, setPastWritingLoading] = useState(false);
   const [pastWritingOpen, setPastWritingOpen] = useState(false);
   const [selectedPastWritingDate, setSelectedPastWritingDate] = useState<string | null>(null);
+  const [pastComprehensionAssignments, setPastComprehensionAssignments] = useState<VocabGeneratedExercise[]>([]);
+  const [pastComprehensionLoading, setPastComprehensionLoading] = useState(false);
+  const [pastComprehensionOpen, setPastComprehensionOpen] = useState(false);
+  const [selectedPastComprehensionDate, setSelectedPastComprehensionDate] = useState<string | null>(null);
 
   const [profileYear, setProfileYear] = useState<string>('');
   const [profileComprehension, setProfileComprehension] = useState('');
@@ -285,6 +298,26 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
         return ta - tb;
       });
   }, [pastWritingAssignments, selectedPastWritingDate]);
+
+  const pastComprehensionDates = useMemo(() => {
+    const keys = new Set<string>();
+    for (const a of pastComprehensionAssignments) {
+      const k = londonCalendarDateKey(a.created_at);
+      if (k) keys.add(k);
+    }
+    return [...keys].sort((a, b) => b.localeCompare(a));
+  }, [pastComprehensionAssignments]);
+
+  const selectedPastComprehensionRows = useMemo(() => {
+    if (!selectedPastComprehensionDate) return [];
+    return pastComprehensionAssignments
+      .filter(a => londonCalendarDateKey(a.created_at) === selectedPastComprehensionDate)
+      .sort((a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return ta - tb;
+      });
+  }, [pastComprehensionAssignments, selectedPastComprehensionDate]);
 
   const selectedPastWritingBatches = useMemo(
     () => groupPastWritingRowsByBatch(selectedPastWritingRows),
@@ -325,6 +358,7 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
     setSelectedPastDate(null);
     setPastQuestDetail([]);
     setSelectedPastWritingDate(null);
+    setSelectedPastComprehensionDate(null);
   }, [studentId]);
 
   useEffect(() => {
@@ -344,6 +378,29 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
       })
       .finally(() => {
         if (!cancelled) setPastWritingLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [studentId]);
+
+  useEffect(() => {
+    if (!studentId || studentId.startsWith('temp-')) {
+      setPastComprehensionAssignments([]);
+      setPastComprehensionLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setPastComprehensionLoading(true);
+    getStudentComprehensionExercises(studentId)
+      .then(rows => {
+        if (!cancelled) setPastComprehensionAssignments(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setPastComprehensionAssignments([]);
+      })
+      .finally(() => {
+        if (!cancelled) setPastComprehensionLoading(false);
       });
     return () => {
       cancelled = true;
@@ -1909,6 +1966,104 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
                           so new assignments show the word.
                         </p>
                       )}
+                    </div>
+                  ))}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Past comprehension exercises */}
+      <div className="bg-gray-50 border-2 border-gray-200 rounded-[2rem] overflow-hidden shadow-sm">
+        <button
+          type="button"
+          onClick={() => setPastComprehensionOpen(prev => !prev)}
+          className="w-full px-6 py-4 flex items-center justify-between gap-3 text-left hover:bg-gray-100 transition-colors"
+        >
+          <h3 className="font-black text-gray-800 uppercase text-xs tracking-widest flex items-center gap-2">
+            <span className="text-lg">📘</span> Past comprehension exercises
+          </h3>
+          <span className="text-gray-500 font-bold text-sm">{pastComprehensionOpen ? '▼' : '▶'}</span>
+        </button>
+        {pastComprehensionOpen && (
+          <div className="px-6 pb-6 pt-0 border-t border-gray-200">
+            {studentId.startsWith('temp-') ? (
+              <p className="text-gray-500 text-sm py-4">Save this student in Supabase to track comprehension history.</p>
+            ) : pastComprehensionLoading && pastComprehensionDates.length === 0 ? (
+              <p className="text-gray-500 text-sm py-4">Loading…</p>
+            ) : pastComprehensionDates.length === 0 ? (
+              <p className="text-gray-500 text-sm py-4">No comprehension exercises assigned yet.</p>
+            ) : (
+              <>
+                <label className="block text-xs font-black text-gray-500 uppercase tracking-widest mb-2">Select a date</label>
+                <select
+                  value={selectedPastComprehensionDate ?? ''}
+                  onChange={e => setSelectedPastComprehensionDate(e.target.value || null)}
+                  className="bg-white border-2 border-gray-200 rounded-xl px-4 py-2.5 font-bold text-gray-900 text-sm cursor-pointer w-full max-w-xs mb-2"
+                >
+                  <option value="">Choose date…</option>
+                  {pastComprehensionDates.map(d => (
+                    <option key={d} value={d}>{formatPastDate(d)}</option>
+                  ))}
+                </select>
+                {selectedPastComprehensionDate &&
+                  (selectedPastComprehensionRows.length === 0 ? (
+                    <p className="text-gray-500 text-sm">No exercises for this date.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      <p className="text-gray-600 text-sm font-medium">
+                        {selectedPastComprehensionRows.length} exercise{selectedPastComprehensionRows.length !== 1 ? 's' : ''} ·{' '}
+                        {selectedPastComprehensionRows.filter(a => a.completed_at).length} submitted
+                      </p>
+                      {selectedPastComprehensionRows.map((a, idx) => {
+                        const questions = Array.isArray(a.questions) ? a.questions : [];
+                        const responseMap = normalizeComprehensionAnswerMap(a.student_response);
+                        return (
+                          <div key={a.id} className="bg-white rounded-xl border-2 border-gray-200 p-4 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="font-black text-gray-900">{a.title || `Comprehension exercise ${idx + 1}`}</p>
+                              <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-lg ${a.completed_at ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'}`}>
+                                {a.completed_at ? 'Submitted' : 'Assigned'}
+                              </span>
+                            </div>
+                            <p className="text-sm font-medium text-gray-700 whitespace-pre-wrap">{a.teacher_instructions}</p>
+                            <div className="rounded-xl bg-slate-50 border border-slate-200 p-3">
+                              <p className="text-sm text-gray-900 whitespace-pre-wrap leading-relaxed">{a.passage}</p>
+                            </div>
+                            <div className="space-y-2">
+                              {questions.map((q, qi) => {
+                                const qo = typeof q === 'object' && q ? (q as Record<string, unknown>) : {};
+                                const qText = typeof qo.question === 'string' ? qo.question : `Question ${qi + 1}`;
+                                const answer = responseMap[`q_${qi}`];
+                                const correctAnswer = typeof qo.answer === 'string' ? qo.answer : '';
+                                const explanation = typeof qo.explanation === 'string' ? qo.explanation : '';
+                                return (
+                                  <div key={qi} className="border border-gray-200 rounded-lg p-3">
+                                    <p className="text-sm font-bold text-gray-900">{qi + 1}. {qText}</p>
+                                    <p className="text-sm mt-1">
+                                      <span className="font-black text-indigo-700">Student answer: </span>
+                                      <span className={answer ? 'text-gray-900' : 'text-gray-400 italic'}>{answer || 'No answer yet'}</span>
+                                    </p>
+                                    <p className="text-sm mt-1">
+                                      <span className="font-black text-emerald-700">Correct answer: </span>
+                                      <span className={correctAnswer ? 'text-gray-900' : 'text-gray-400 italic'}>
+                                        {correctAnswer || 'No answer key stored'}
+                                      </span>
+                                    </p>
+                                    {explanation && (
+                                      <p className="text-xs mt-1 text-gray-600">
+                                        <span className="font-black text-gray-700">Explanation: </span>
+                                        {explanation}
+                                      </p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   ))}
               </>
