@@ -284,6 +284,7 @@ const ComprehensionExercisesModal: React.FC<ComprehensionExercisesModalProps> = 
   const [backgroundKnowledgeLevel, setBackgroundKnowledgeLevel] = useState<string[]>([]);
   const [questionDifficultyLevel, setQuestionDifficultyLevel] = useState<string[]>([]);
   const [questionType, setQuestionType] = useState<string[]>([]);
+  const [questionTypeCounts, setQuestionTypeCounts] = useState<Record<string, number>>({});
   const [supportScaffoldLevel, setSupportScaffoldLevel] = useState<string[]>([]);
   const [writingSkillFocus, setWritingSkillFocus] = useState<string[]>([]);
   const [writerCraftFeature, setWriterCraftFeature] = useState<string[]>([]);
@@ -347,6 +348,9 @@ const ComprehensionExercisesModal: React.FC<ComprehensionExercisesModalProps> = 
       backgroundKnowledgeLevel,
       questionDifficultyLevel,
       questionType,
+      questionTypeCounts: Object.fromEntries(
+        questionType.map((id) => [id, Math.max(1, Math.min(20, Math.floor(questionTypeCounts[id] ?? 1)))] )
+      ),
       supportScaffoldLevel,
       writingSkillFocus,
       writerCraftFeature,
@@ -382,6 +386,12 @@ const ComprehensionExercisesModal: React.FC<ComprehensionExercisesModalProps> = 
     } finally {
       setLoading(false);
     }
+  };
+
+  const setQuestionTypeCount = (id: string, raw: number) => {
+    const n = Number.isFinite(raw) ? Math.floor(raw) : 1;
+    const safe = Math.max(1, Math.min(20, n));
+    setQuestionTypeCounts((prev) => ({ ...prev, [id]: safe }));
   };
 
   const handlePrint = () => {
@@ -518,6 +528,29 @@ const ComprehensionExercisesModal: React.FC<ComprehensionExercisesModalProps> = 
                     selected={questionType}
                     onChange={setQuestionType}
                   />
+                  {questionType.length > 0 && (
+                    <div className="bg-white border-2 border-gray-200 rounded-2xl p-3 md:col-span-2">
+                      <p className="text-xs font-black text-gray-500 uppercase tracking-wider mb-2">
+                        Question counts per selected type
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                        {questionType.map((id) => (
+                          <div key={id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-indigo-50">
+                            <span className="text-sm font-bold text-gray-800 truncate">{id}</span>
+                            <input
+                              type="number"
+                              min={1}
+                              max={20}
+                              value={questionTypeCounts[id] ?? 1}
+                              onChange={(e) => setQuestionTypeCount(id, Number(e.target.value))}
+                              className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-xs font-black text-center"
+                              aria-label={`${id} question count`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <MultiSelectDropdown
                     label="Support / scaffold level"
                     options={SUPPORT_SCAFFOLD_LEVEL_OPTIONS}
@@ -656,6 +689,22 @@ const ComprehensionExercisesModal: React.FC<ComprehensionExercisesModalProps> = 
                     <p className="text-sm text-gray-600">{q.explanation}</p>
                   </article>
                 ))}
+              </section>
+
+              <section className="border-t pt-4">
+                <h4 className="text-sm font-black text-gray-800 uppercase tracking-widest mb-2">
+                  Source words used for generation
+                </h4>
+                <div className="flex flex-wrap gap-2">
+                  {wordsForGeneration.map((w) => (
+                    <span
+                      key={`source-${w.id}`}
+                      className="bg-indigo-50 border border-indigo-200 px-3 py-1 rounded-full text-sm font-black text-indigo-800"
+                    >
+                      {formatWordForDisplay(w.word)}
+                    </span>
+                  ))}
+                </div>
               </section>
             </div>
           )}

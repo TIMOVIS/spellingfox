@@ -226,7 +226,6 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
   const [uploading, setUploading] = useState(false);
   const [generatingDaily, setGeneratingDaily] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [addToDailyByDefault, setAddToDailyByDefault] = useState(true);
   const [recommendedDaily, setRecommendedDaily] = useState<WordEntry[] | null>(null);
   const [loadingWords, setLoadingWords] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -521,18 +520,6 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
         const wordEntries = vocabWords.map(vocabWordToWordEntry);
         onUpdateWords(wordEntries);
 
-        // Pin to daily quest using the ID from the insert response (reliable)
-        if (addToDailyByDefault && addedWord?.id) {
-          try {
-            await toggleDailyQuestWord(studentId, addedWord.id);
-            onToggleDaily(addedWord.id);
-            await onRefetchDailyQuest?.();
-          } catch (error) {
-            console.error('Failed to add word to daily quest in Supabase:', error);
-            onToggleDaily(addedWord.id);
-          }
-        }
-        
         setNewWord('');
         setError(null); // Clear any previous errors
       } catch (supabaseErr: any) {
@@ -541,9 +528,6 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
         setError(`Database error: ${errorMsg}. The word was generated but not saved.`);
         // Still add to local state even if Supabase fails
         onUpdateWords([fullWord, ...wordBank]);
-        if (addToDailyByDefault) {
-          onToggleDaily(fullWord.id);
-        }
         setNewWord('');
       }
     } catch (err: any) {
@@ -662,17 +646,6 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
               const vocabWords = await getAllWords();
               const wordEntries = vocabWords.map(vocabWordToWordEntry);
               onUpdateWords(wordEntries);
-              if (addToDailyByDefault && addedWordIds.length > 0) {
-                try {
-                  for (const wordId of addedWordIds) {
-                    await toggleDailyQuestWord(studentId, wordId);
-                    onToggleDaily(wordId);
-                  }
-                  await onRefetchDailyQuest?.();
-                } catch (dailyQuestErr) {
-                  console.error('Failed to add words to daily quest:', dailyQuestErr);
-                }
-              }
               setError(null);
               if (addedWordIds.length > 0 || skipped > 0) {
                 setSuccessMessage(
@@ -1289,16 +1262,6 @@ const TutorDashboard: React.FC<TutorDashboardProps> = ({
           <p className="text-xs text-gray-500 mb-6 italic">AI detects curriculum level and spelling patterns automatically.</p>
           
           <div className="space-y-6 mt-auto">
-            <div className="flex items-center justify-between bg-indigo-50/50 p-4 rounded-2xl border border-indigo-100">
-              <span className="text-sm font-black text-indigo-900 uppercase tracking-tight">Add to Daily Quest automatically?</span>
-              <button 
-                onClick={() => setAddToDailyByDefault(!addToDailyByDefault)}
-                className={`w-14 h-8 rounded-full p-1 transition-all flex items-center ${addToDailyByDefault ? 'bg-orange-500 justify-end' : 'bg-gray-300 justify-start'}`}
-              >
-                <div className="w-6 h-6 bg-white rounded-full shadow-sm"></div>
-              </button>
-            </div>
-
             <div className="flex gap-2">
               <input 
                 type="text" 

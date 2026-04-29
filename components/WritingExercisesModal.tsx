@@ -66,6 +66,8 @@ function matchWordIdFromFocus(focusWord: string | undefined, words: WordEntry[])
 }
 
 const MAX_WORDS = 12;
+const MIN_TYPE_COUNT = 1;
+const MAX_TYPE_COUNT = 12;
 
 interface WritingExercisesModalProps {
   open: boolean;
@@ -86,6 +88,9 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
   onAssigned,
 }) => {
   const [typeIds, setTypeIds] = useState<Set<string>>(() => new Set(WRITING_EXERCISE_TYPES.map(t => t.id)));
+  const [typeCounts, setTypeCounts] = useState<Record<string, number>>(() =>
+    Object.fromEntries(WRITING_EXERCISE_TYPES.map((t) => [t.id, 1]))
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<GeneratedWritingExerciseItem[] | null>(null);
@@ -104,14 +109,24 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
   const selectAllTypes = () => setTypeIds(new Set(WRITING_EXERCISE_TYPES.map(t => t.id)));
   const clearAllTypes = () => setTypeIds(new Set());
 
+  const setTypeCount = (id: string, raw: number) => {
+    const n = Number.isFinite(raw) ? Math.floor(raw) : MIN_TYPE_COUNT;
+    const safe = Math.max(MIN_TYPE_COUNT, Math.min(MAX_TYPE_COUNT, n));
+    setTypeCounts(prev => ({ ...prev, [id]: safe }));
+  };
+
   const handleGenerate = async () => {
     const words = selectedWords.slice(0, MAX_WORDS);
     const ids = [...typeIds];
+    const expandedTypeIds = ids.flatMap((id) => {
+      const count = Math.max(MIN_TYPE_COUNT, Math.min(MAX_TYPE_COUNT, typeCounts[id] ?? 1));
+      return Array.from({ length: count }, () => id);
+    });
     if (words.length === 0) {
       setError('Select at least one word in the word bank table.');
       return;
     }
-    if (ids.length === 0) {
+    if (expandedTypeIds.length === 0) {
       setError('Choose at least one exercise type.');
       return;
     }
@@ -128,7 +143,7 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
           priorByWordAndType = undefined;
         }
       }
-      const result = await generateWritingExercises(words, ids, priorByWordAndType);
+      const result = await generateWritingExercises(words, expandedTypeIds, priorByWordAndType);
       setItems(result);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to generate exercises.');
@@ -237,7 +252,7 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
           <div>
             <h2 className="text-xl font-black text-gray-900 tracking-tight">Writing exercises</h2>
             <p className="text-xs text-gray-600 font-medium mt-0.5">
-              One exercise per selected word · British English · printable. Multiple types rotate across words.
+              British English · printable. Use per-type counts to generate multiple questions of each type.
             </p>
           </div>
           <button
@@ -306,18 +321,28 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto border-2 border-gray-100 rounded-2xl p-3">
                   {WRITING_EXERCISE_TYPES.map(t => (
-                    <label
-                      key={t.id}
-                      className="flex items-start gap-2 text-sm cursor-pointer text-gray-800 hover:bg-emerald-50/50 rounded-lg p-1.5"
-                    >
+                    <div key={t.id} className="flex items-center justify-between gap-2 text-sm text-gray-800 hover:bg-emerald-50/50 rounded-lg p-1.5">
+                      <label className="flex items-start gap-2 cursor-pointer flex-1 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={typeIds.has(t.id)}
+                          onChange={() => toggleType(t.id)}
+                          className="mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                        />
+                        <span className="font-bold truncate">{t.label}</span>
+                      </label>
                       <input
-                        type="checkbox"
-                        checked={typeIds.has(t.id)}
-                        onChange={() => toggleType(t.id)}
-                        className="mt-0.5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+                        type="number"
+                        min={MIN_TYPE_COUNT}
+                        max={MAX_TYPE_COUNT}
+                        value={typeCounts[t.id] ?? 1}
+                        onChange={(e) => setTypeCount(t.id, Number(e.target.value))}
+                        disabled={!typeIds.has(t.id)}
+                        className="w-16 rounded-lg border border-gray-300 px-2 py-1 text-xs font-black text-center disabled:opacity-40"
+                        title="How many questions of this type"
+                        aria-label={`${t.label} question count`}
                       />
-                      <span className="font-bold">{t.label}</span>
-                    </label>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -391,7 +416,7 @@ const WritingExercisesModal: React.FC<WritingExercisesModalProps> = ({
               <header className="border-b-2 border-gray-200 pb-4 print:border-gray-400">
                 <h1 className="text-2xl font-black text-gray-900 print:text-black">Writing worksheet</h1>
                 <p className="text-sm text-gray-600 mt-1 print:text-gray-800">
-                  {items.length} exercise{items.length !== 1 ? 's' : ''} (one per word):{' '}
+                  {items.length} exercise{items.length !== 1 ? 's' : ''} across selected words:{' '}
                   {wordsForGen.map(w => formatWordForDisplay(w.word)).join(', ')}
                 </p>
               </header>

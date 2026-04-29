@@ -317,6 +317,7 @@ export interface ComprehensionExerciseConfig {
   backgroundKnowledgeLevel: string[];
   questionDifficultyLevel: string[];
   questionType: string[];
+  questionTypeCounts?: Record<string, number>;
   supportScaffoldLevel: string[];
   writingSkillFocus: string[];
   writerCraftFeature: string[];
@@ -359,12 +360,13 @@ type WritingExercisePlanRow = {
 
 function buildWritingExercisePlan(
   words: Pick<WordEntry, "id" | "word" | "definition" | "example" | "yearGroup">[],
-  ids: string[],
+  expandedTypeIds: (typeof WRITING_EXERCISE_TYPE_IDS)[number][],
   globalWordOffset: number
 ): WritingExercisePlanRow[] {
-  return words.map((w, i) => ({
-    word: w,
-    typeId: ids[(globalWordOffset + i) % ids.length] as (typeof WRITING_EXERCISE_TYPE_IDS)[number],
+  if (words.length === 0 || expandedTypeIds.length === 0) return [];
+  return expandedTypeIds.map((typeId, i) => ({
+    word: words[(globalWordOffset + i) % words.length],
+    typeId,
   }));
 }
 
@@ -455,7 +457,7 @@ Return a JSON array only, length ${n}.`;
   if (!apiKey || !ai) {
     return callGeminiServer<GeneratedWritingExerciseItem[]>("writingExercises", {
       words: plan.map(p => p.word),
-      exerciseTypeIds: ids,
+      exerciseTypeIds: plan.map(p => p.typeId),
       globalWordOffset,
       ...(priorByWordAndType && Object.keys(priorByWordAndType).length > 0
         ? { priorByWordAndType }
@@ -553,23 +555,24 @@ export const generateWritingExercises = async (
   if (trimmedWords.length === 0) {
     throw new Error("Select at least one word from the word bank.");
   }
-  const ids = [...new Set(exerciseTypeIds)].filter(id => WRITING_EXERCISE_TYPE_IDS.includes(id as (typeof WRITING_EXERCISE_TYPE_IDS)[number]));
-  if (ids.length === 0) {
+  const expandedIds = exerciseTypeIds.filter(id =>
+    WRITING_EXERCISE_TYPE_IDS.includes(id as (typeof WRITING_EXERCISE_TYPE_IDS)[number])
+  ) as (typeof WRITING_EXERCISE_TYPE_IDS)[number][];
+  if (expandedIds.length === 0) {
     throw new Error("Choose at least one exercise type.");
   }
 
+  const planAll = buildWritingExercisePlan(trimmedWords, expandedIds, globalWordOffset);
   const chunk = WRITING_EX_GEN_CHUNK_SIZE;
-  if (trimmedWords.length <= chunk) {
-    const plan = buildWritingExercisePlan(trimmedWords, ids, globalWordOffset);
-    return runSingleWritingExercisePlan(plan, ids, priorByWordAndType, globalWordOffset);
+  if (planAll.length <= chunk) {
+    return runSingleWritingExercisePlan(planAll, [...new Set(expandedIds)], priorByWordAndType, globalWordOffset);
   }
 
   const merged: GeneratedWritingExerciseItem[] = [];
-  for (let i = 0; i < trimmedWords.length; i += chunk) {
-    const slice = trimmedWords.slice(i, i + chunk);
+  for (let i = 0; i < planAll.length; i += chunk) {
+    const slicePlan = planAll.slice(i, i + chunk);
     const offset = globalWordOffset + i;
-    const plan = buildWritingExercisePlan(slice, ids, offset);
-    merged.push(...(await runSingleWritingExercisePlan(plan, ids, priorByWordAndType, offset)));
+    merged.push(...(await runSingleWritingExercisePlan(slicePlan, [...new Set(expandedIds)], priorByWordAndType, offset)));
   }
   return merged;
 };
@@ -600,6 +603,12 @@ export const generateComprehensionExercises = async (
     .join("\n");
 
   const list = (x: string[]) => x.join(", ");
+  const selectedQuestionTypes = [...new Set(config.questionType)];
+  const questionTypeCounts = Object.fromEntries(
+    selectedQuestionTypes.map((id) => [id, Math.max(1, Math.floor(config.questionTypeCounts?.[id] ?? 1))])
+  );
+  const totalQuestions = Object.values(questionTypeCounts).reduce((a, b) => a + b, 0);
+  const questionCountLines = Object.entries(questionTypeCounts).map(([k, v]) => `- ${k}: ${v}`).join("\n");
 
   const prompt = `Create one UK-primary comprehension worksheet and answer key.
 
@@ -617,6 +626,8 @@ Teacher choices:
 - background knowledge level: ${list(config.backgroundKnowledgeLevel)}
 - question difficulty level: ${list(config.questionDifficultyLevel)}
 - question type: ${list(config.questionType)}
+- question counts by type:
+${questionCountLines}
 - support / scaffold level: ${list(config.supportScaffoldLevel)}
 - writing skill focus: ${list(config.writingSkillFocus)}
 - writer’s craft feature: ${list(config.writerCraftFeature)}
@@ -629,17 +640,18 @@ Teacher choices:
 Requirements:
 1) Write a single comprehension passage in the selected word-count range.
 2) Keep language in British English and suitable for the selected year groups.
-3) Include exactly 10 questions in total, mixing the chosen question types.
-4) Every question must include: questionType, difficulty, question, options (empty array if not MCQ), answer, explanation.
-5) The selected vocabulary words may appear in the passage OR in the questions (or both). Do not force every selected word into the passage.
-6) Apply support/scaffold level in question wording and hints.
-7) Include follow-up style in question design using writing skill focus, writer’s craft feature, and punctuation focus.
-8) Ensure at least:
+3) Include exactly ${totalQuestions} questions in total.
+4) Use the exact per-type counts listed under "question counts by type".
+5) Every question must include: questionType, difficulty, question, options (empty array if not MCQ), answer, explanation.
+6) The selected vocabulary words may appear in the passage OR in the questions (or both). Do not force every selected word into the passage.
+7) Apply support/scaffold level in question wording and hints.
+8) Include follow-up style in question design using writing skill focus, writer’s craft feature, and punctuation focus.
+9) Ensure at least:
    - 2 VR questions aligned to selected VR question types
    - 2 Grammar questions aligned to selected Grammar question types
    - 2 Sentence questions aligned to selected sentence question types
-9) If MCQ, include 4 options.
-10) Return JSON only.`;
+10) If MCQ, include 4 options.
+11) Return JSON only.`;
 
   const response = await ai.models.generateContent({
     model: "gemini-3-flash-preview",
